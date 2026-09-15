@@ -1,71 +1,67 @@
 {
   "personal": {
-    "fullName": "John Doe",
-    "firstName": "John",
-    "lastName": "Doe",
-    "email": "john.doe@example.com",
-    "phone": "9876543210",
+    "fullName": "Candidate Name",
+    "firstName": "Candidate",
+    "lastName": "Name",
+    "email": "candidate@example.com",
+    "phone": "+91 9876543210",
     "city": "Bengaluru",
     "state": "Karnataka",
     "country": "India",
-    "gender": "Male",
-    "maritalStatus": "Single",
-    "linkedin": "https://linkedin.com/in/example",
-    "github": "https://github.com/example"
+    "linkedin": "https://linkedin.com/in/candidate",
+    "github": "https://github.com/candidate",
+    "gender": "Male"
   },
   "work": {
+    "targetRole": {
+      "jobTitle": "Data Analyst, MIS Analyst, Business Intelligence Analyst",
+      "targetLocation": "Bengaluru, Karnataka",
+      "expectedSalary": "600000",
+      "noticePeriod": "Immediate",
+      "targetResumeName": "Resume.pdf"
+    },
     "currentRole": {
-      "jobTitle": "Software Engineer",
-      "company": "Acme Software Solutions",
-      "yearsExperience": "3",
-      "currentSalary": "1200000",
-      "currentSalaryLakhs": "12"
+      "jobTitle": "Junior Analyst",
+      "company": "Tech Solutions Pvt Ltd",
+      "yearsExperience": 1,
+      "currentSalary": "400000"
     }
   },
-  "savedSearches": [
-    { "role": "Senior Software Engineer", "location": "Bengaluru", "experience": "3" },
-    { "role": "Full Stack Developer",     "location": "Hyderabad", "experience": "2" },
-    { "role": "React Developer",          "location": "Remote",    "experience": "2" }
-  ],
   "education": {
-    "degree": "Bachelor of Technology",
+    "degree": "Bachelor of Technology (B.Tech)",
     "major": "Computer Science & Engineering",
-    "university": "Sample University of Technology",
-    "graduationYear": "2022"
+    "university": "Visvesvaraya Technological University",
+    "graduationYear": "2024"
+  },
+  "autoApplierSettings": {
+    "targetJobQuery": "Data Analyst, MIS Analyst, BI Analyst",
+    "targetLocation": "Bengaluru, Karnataka",
+    "minMonthlySalary": 25000,
+    "userYearsExp": 1,
+    "unlistedExpAction": "apply",
+    "strictLocation": true,
+    "easyApplyOnly": false,
+    "blockAiSpam": true,
+    "matchTitleRelevance": true,
+    "saveContactJobs": true,
+    "blockedCompanies": "TeamLease, Quess Corp, Crossing Hurdles, Outlier, Remotasks, Adecco, Randstad",
+    "blacklistKeywords": "intern, unpaid, bpo, telecaller, faculty, teaching, night shift",
+    "jobFreshness": "1",
+    "stepDelayMs": 1200,
+    "maxJobsPerSession": 25
   },
   "screening": [
-    {
-      "keywords": "javascript, python, programming, react",
-      "answer": "Yes, 3+ years hands-on experience building production software."
-    },
-    {
-      "keywords": "relocate, relocation, location",
-      "answer": "Yes, willing to relocate if required."
-    },
-    {
-      "keywords": "notice period, availability, join, how soon",
-      "answer": "30 Days"
-    },
-    {
-      "keywords": "ctc, salary, current ctc",
-      "answer": "12 Lakhs"
-    },
-    {
-      "keywords": "expected ctc, desired ctc",
-      "answer": "18 Lakhs"
-    },
-    {
-      "keywords": "authorized, legal, work permit, passport",
-      "answer": "Yes"
-    }
-  ],
-  "settings": {
-    "autoFillOnLoad": true,
-    "pauseOnUnmatchedFields": true,
-    "stepDelayMs": 500,
-    "autoSelectResume": true,
-    "autoAdvanceStep": true,
-    "autoSubmitApplication": true,
-    "highlightFilledFields": true
-  }
+    { "keywords": "sql, query, postgresql, mysql", "answer": "3" },
+    { "keywords": "excel, advanced excel, vlookup, pivot", "answer": "4" },
+    { "keywords": "power bi, powerbi, tableau, visualization", "answer": "3" },
+    { "keywords": "python, pandas, numpy", "answer": "2" },
+    { "keywords": "notice period, how soon can you start, availability, joining time", "answer": "Immediate" },
+    { "keywords": "relocate, commute, work from office, hybrid, on-site", "answer": "Yes" },
+    { "keywords": "authorized to work, work authorization, eligible to work in india", "answer": "Yes" },
+    { "keywords": "18 years of age, legal age, background check", "answer": "Yes" },
+    { "keywords": "highest qualification, completed degree, education level", "answer": "Bachelor's Degree" },
+    { "keywords": "current ctc, fixed ctc, present salary", "answer": "400000" },
+    { "keywords": "expected ctc, desired salary", "answer": "600000" },
+    { "keywords": "total experience, years of experience, overall experience", "answer": "1" }
+  ]
 }

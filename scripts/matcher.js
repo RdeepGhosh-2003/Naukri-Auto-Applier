@@ -1,442 +1,446 @@
 /**
- * Naukri SpeedFill - Matcher Module
- * Sub-10ms Fuzzy Label & Field Identifier Engine for Naukri.com
+ * Naukri Automated Job Application - Matcher & Heuristics Engine
+ * High-speed fuzzy screening Q&A matcher, multi-tier filter rules,
+ * recruiter contact extractor (Phone, Gmail, Email), experience and salary parser.
  */
 
-(function() {
-  const CONTAINER_SELECTORS = [
-    '.drawer-wrapper',
-    '.apply-drawer',
-    '.chatbot-container',
-    '.modal-container',
-    'div[class*="modal"]',
-    'div[class*="drawer"]',
-    'div[class*="apply-container"]',
-    'div[class*="applyContainer"]',
-    'div[class*="chatbot"]',
-    'form[name*="apply"]',
-    'form[id*="apply"]',
-    'form[class*="apply"]',
-    'div.apply-message',
-    'div.tuple-apply'
-  ];
-
-  const EXCLUDED_CONTAINER_SELECTORS = [
-    'form[name="searchForm"]',
-    '.nMainNavbar',
-    '.search-box',
-    '#qsb-keys-sug',
-    '#qsb-location-sug',
-    '#qsb-experience-sug',
-    'header',
-    'nav',
-    '[role="navigation"]',
-    '.header-container',
-    '.navbar',
-    'footer',
-    '[role="contentinfo"]',
-    '#login-modal',
-    'div[class*="auth-modal"]',
-    'div[class*="login-container"]',
-    'div[class*="SearchBox"]',
-    'div[class*="search-box"]',
-    '#feedback-form'
-  ];
-
-  const EXCLUDED_ELEMENT_IDS = new Set([
-    'qsb-keys-sug',
-    'qsb-location-sug',
-    'qsb-experience-sug',
-    'naukri-search-fill-btn',
-    'qsbForm',
-    'keyword',
-    'location',
-    'experience',
-    'feedback-input'
+(function () {
+  const STOPWORDS = new Set([
+    'what', 'your', 'with', 'have', 'from', 'this', 'that', 'rate',
+    'how', 'are', 'you', 'the', 'for', 'any', 'please', 'mention',
+    'select', 'enter', 'give', 'tell', 'us', 'specify', 'do', 'does'
   ]);
 
-  const EXCLUDED_ELEMENT_NAMES = new Set([
-    'qp',
-    'ql',
-    'qe',
-    'keyword',
-    'location',
-    'experience',
-    'search',
-    'qsbKeys',
-    'qsbLoc'
-  ]);
-
-  // Field dictionary mapping label keywords to profile paths
-  const FIELD_MAPPINGS = [
-    // Current Role
-    { keys: ['current job title', 'current role', 'present position', 'recent job title', 'current designation', 'designation', 'role', 'position', 'job title'], path: 'work.currentRole.jobTitle' },
-    { keys: ['current company', 'present company', 'company name', 'company', 'employer', 'organization', 'current employer'], path: 'work.currentRole.company' },
-    { keys: ['years of experience', 'years experience', 'total experience', 'experience in years', 'exp', 'total exp', 'overall experience'], path: 'work.currentRole.yearsExperience' },
-    { keys: ['current ctc', 'current salary', 'present salary', 'annual ctc', 'current ctc (in lacs)', 'current ctc in lakhs', 'fixed ctc'], path: 'work.currentRole.currentSalary' },
-
-    // Target Role & Skills
-    { keys: ['target job title', 'desired role', 'target role', 'desired position', 'role applying for'], path: 'work.targetRole.jobTitle' },
-    { keys: ['key skills', 'skills', 'technical skills', 'primary skills', 'core skills', 'skill tags'], path: 'work.targetRole.keySkills' },
-    { keys: ['expected ctc', 'expected salary', 'desired salary', 'expected ctc (in lacs)', 'expected ctc in lakhs'], path: 'work.targetRole.expectedSalary' },
-    { keys: ['notice period', 'notice period (days)', 'notice', 'how soon can you start', 'availability', 'joining time', 'notice period in days'], path: 'work.targetRole.noticePeriod' },
-    { keys: ['target location', 'preferred location', 'desired city', 'preferred work location', 'job location preference'], path: 'work.targetRole.targetLocation' },
-
-    // Personal Details
-    { keys: ['first name', 'given name'], path: 'personal.firstName' },
-    { keys: ['last name', 'surname', 'family name'], path: 'personal.lastName' },
-    { keys: ['full name', 'name', 'your name'], path: 'personal.fullName' },
-    { keys: ['email', 'email address', 'official email', 'personal email'], path: 'personal.email' },
-    { keys: ['phone', 'mobile', 'contact number', 'phone number', 'mobile number'], path: 'personal.phone' },
-    { keys: ['city', 'location', 'current city', 'residence city'], path: 'personal.city' },
-    { keys: ['state', 'province'], path: 'personal.state' },
-    { keys: ['country'], path: 'personal.country' },
-    { keys: ['gender', 'sex'], path: 'personal.gender' },
-    { keys: ['marital status'], path: 'personal.maritalStatus' },
-    { keys: ['linkedin', 'linkedin profile', 'linkedin url'], path: 'personal.linkedin' },
-    { keys: ['github', 'portfolio', 'personal website'], path: 'personal.github' },
-
-    // Education
-    { keys: ['highest qualification', 'degree', 'qualification', 'education level', 'course'], path: 'education.degree' },
-    { keys: ['field of study', 'major', 'stream', 'specialization', 'branch'], path: 'education.major' },
-    { keys: ['university', 'college', 'school', 'institution', 'institute'], path: 'education.university' },
-    { keys: ['graduation year', 'year of completion', 'passing year', 'year of passing'], path: 'education.graduationYear' }
-  ];
-
-  /**
-   * Check if element is inside an excluded parent container
-   */
-  function isInsideExcludedContainer(el) {
-    if (!el) return false;
-    for (const selector of EXCLUDED_CONTAINER_SELECTORS) {
-      if (el && typeof el.closest === 'function' && el.closest(selector)) return true;
-    }
-    return false;
+  function escapeRegex(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  /**
-   * Get active job application container
-   */
-  function getAppContainer(doc) {
-    const scope = doc || (typeof document !== 'undefined' ? document : null);
-    if (!scope || typeof scope.querySelectorAll !== 'function') return null;
+  // Normalize unicode dashes (e.g. – — −)
+  function normalizeText(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/[\u2010-\u2015\u2212\u2013\u2014]/g, '-')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
 
-    const EXCLUDED_CHILD_FORMS = '#feedback-form, #login-modal, form[class*="login"], form[name="searchForm"]';
-    for (const selector of CONTAINER_SELECTORS) {
-      const candidates = scope.querySelectorAll(selector);
-      for (const container of candidates) {
-        if (!container) continue;
-        if (isInsideExcludedContainer(container)) continue;
-        if (container.querySelector && container.querySelector(EXCLUDED_CHILD_FORMS) !== null) continue;
-        return container;
+  // ============================================================================
+  // 1. RECRUITER CONTACT EXTRACTOR (Phone, Mobile, Gmail, Corporate Email)
+  // ============================================================================
+  function extractRecruiterContact(text) {
+    if (!text || typeof text !== 'string') {
+      return { hasContact: false, emails: [], phones: [], primaryEmail: null, primaryPhone: null, isGmail: false, summary: '' };
+    }
+
+    const clean = normalizeText(text);
+
+    // 1. Extract Email addresses
+    const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
+    const rawEmails = clean.match(emailRegex) || [];
+    // Filter out common false positives (e.g. image filenames, sdk examples)
+    const ignoredEmailDomains = ['example.com', 'sample.com', 'domain.com', 'email.com', 'naukri.com', 'infoedge.in'];
+    const emails = Array.from(new Set(rawEmails.map(e => e.trim().toLowerCase()))).filter(e => {
+      const domain = e.split('@')[1];
+      return domain && !ignoredEmailDomains.includes(domain) && !e.endsWith('.png') && !e.endsWith('.jpg');
+    });
+
+    // 2. Extract Indian mobile numbers and contact phone numbers
+    // Matches +91 9876543210, 09876543210, 9876543210, 88888 88888, WhatsApp: 9876543210
+    const phoneMatches = [];
+
+    // Contextual patterns (call, contact, whatsapp, reach, mobile, ph, hr)
+    const contextPhoneRegex = /(?:whatsapp|wa\.me|contact|call|reach|phone|ph|mobile|hr|hiring manager|send resume to)?\s*[:\-]?\s*(?:\+91[\-\s]?)?([6-9]\d{4}[\-\s]?\d{5}|[6-9]\d{9})\b/gi;
+    let match;
+    while ((match = contextPhoneRegex.exec(clean)) !== null) {
+      if (match[1]) {
+        const rawDigits = match[1].replace(/[\-\s]/g, '');
+        if (rawDigits.length === 10 && /^[6-9]/.test(rawDigits)) {
+          phoneMatches.push(rawDigits);
+        }
       }
     }
 
-    if (typeof window !== 'undefined' && window.top !== window.self) {
-      const href = (window.location && window.location.href) || '';
-      if (
-        href.includes('naukri.com/mnjuser/apply') ||
-        href.includes('/apply') ||
-        href.includes('naukri.com/job-listings')
-      ) {
-        return scope.body || null;
+    // Direct standalone 10-digit Indian mobile regex
+    const mobileRegex = /(?:\+?91[\-\s]?)?\b([6-9]\d{9})\b/g;
+    while ((match = mobileRegex.exec(clean)) !== null) {
+      if (match[1]) {
+        phoneMatches.push(match[1]);
       }
     }
+
+    const phones = Array.from(new Set(phoneMatches));
+    const isGmail = emails.some(e => e.endsWith('@gmail.com'));
+    const hasContact = emails.length > 0 || phones.length > 0;
+
+    const primaryEmail = emails[0] || null;
+    const primaryPhone = phones[0] || null;
+
+    let summaryParts = [];
+    if (primaryEmail) summaryParts.push(primaryEmail);
+    if (primaryPhone) summaryParts.push(`+91 ${primaryPhone}`);
+    const summary = summaryParts.join(' | ');
+
+    return {
+      hasContact,
+      emails,
+      phones,
+      primaryEmail,
+      primaryPhone,
+      isGmail,
+      summary
+    };
+  }
+
+  // ============================================================================
+  // 2. FUZZY SCREENING Q&A MATCHER & NORMALIZERS
+  // ============================================================================
+  function findScreeningAnswer(labelText, screeningBank) {
+    if (!labelText || !Array.isArray(screeningBank)) return null;
+
+    const cleanLabel = labelText.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+
+    for (const item of screeningBank) {
+      if (!item.keywords || !item.answer) continue;
+      const rawKeys = item.keywords.toLowerCase().split(/[,/|]/).map(k => k.trim());
+
+      for (const rawKey of rawKeys) {
+        const key = rawKey.replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+        if (!key) continue;
+
+        // Strategy 1: Direct Phrase Containment
+        if (cleanLabel.includes(key) || key.includes(cleanLabel)) {
+          return { answer: item.answer, confidence: 0.95, matchedKey: key };
+        }
+
+        // Strategy 2: Multi-Token Overlap
+        const keyTokens = key.split(' ').filter(t => t.length > 2 && !STOPWORDS.has(t));
+        if (keyTokens.length > 0 && keyTokens.every(tok => cleanLabel.includes(tok))) {
+          return { answer: item.answer, confidence: 0.90, matchedKey: key };
+        }
+      }
+    }
+
     return null;
   }
 
-  /**
-   * Check if element is a non-application input or search bar
-   */
-  function isNonApplicationInput(el) {
-    if (!el) return true;
+  function normalizeDegreeCategory(str) {
+    if (!str) return null;
+    const clean = String(str).toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
 
-    if (isInsideExcludedContainer(el)) return true;
+    if (/\b(master|masters|m\s*tech|mtech|mca|mba|ms|postgraduate)\b/i.test(clean)) return 'master';
+    if (/\b(doctorate|ph\s*d|phd)\b/i.test(clean)) return 'doctorate';
+    if (/\b(bachelor|bachelors|b\s*tech|btech|bca|b\s*e|be|bsc|bcom|graduation|graduate)\b/i.test(clean)) return 'bachelor';
+    if (/\b(12th|10th|high\s*school|diploma|secondary)\b/i.test(clean)) return 'highschool';
+    return null;
+  }
 
-    const id = String(el?.id || '').toLowerCase();
-    const name = String(el?.name || '').toLowerCase();
-    const role = String(el?.getAttribute ? (el.getAttribute('role') || '') : '').toLowerCase();
-    const cls = typeof el.className === 'string'
-      ? el.className.toLowerCase()
-      : (el.className && typeof el.className.baseVal === 'string' ? el.className.baseVal.toLowerCase() : '');
+  function normalizeNoticePeriod(str) {
+    if (!str) return null;
+    const clean = String(str).toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
 
-    if (EXCLUDED_ELEMENT_IDS.has(id)) return true;
-    if (EXCLUDED_ELEMENT_NAMES.has(name)) return true;
-    if (role === 'searchbox') return true;
+    if (/\b(immediate|immediately|available\s*now|serving\s*notice|0\s*days?)\b/i.test(clean)) return 'immediate';
+    if (/\b(15\s*days?|2\s*weeks?)\b/i.test(clean)) return '15days';
+    if (/\b(30\s*days?|1\s*months?|4\s*weeks?)\b/i.test(clean)) return '30days';
+    if (/\b(60\s*days?|2\s*months?)\b/i.test(clean)) return '60days';
+    if (/\b(90\s*days?|3\s*months?)\b/i.test(clean)) return '90days';
+    return null;
+  }
 
-    if (id.startsWith('qsb-') || name.startsWith('qsb') || cls.includes('qsb-input')) {
+  // ============================================================================
+  // 3. MULTI-TIER HEURISTIC FILTERS
+  // ============================================================================
+
+  // AI Gig, Micro-Task & Annotation Spam Shield
+  const SPAM_COMPANIES = [
+    'crossing hurdles', 'outlier', 'remotasks', 'dataannotation', 'alignerr',
+    'mindrift', 'oneforma', 'invisible technologies', 'appen', 'telus international',
+    'welocalize', 'clickworker', 'toloka'
+  ];
+
+  const GIG_TITLE_KEYWORDS = [
+    'annotator', 'annotation', 'data annotator', 'data reviewer', 'ai reviewer',
+    'content reviewer', 'data labeler', 'data labeling', 'ai trainer', 'model trainer',
+    'data trainer', 'rlhf', 'prompt evaluator', 'ai evaluator', 'transcriptionist',
+    'data entry', 'form filling', 'crowdworker', 'micro task', 'microtask'
+  ];
+
+  function isAiGigSpam(title = '', company = '', text = '') {
+    const tLower = title.toLowerCase();
+    const cLower = company.toLowerCase();
+    const full = `${title} ${text}`.toLowerCase();
+
+    // Check spam companies
+    if (SPAM_COMPANIES.some(sc => cLower.includes(sc) || tLower.includes(sc))) {
+      return { isSpam: true, reason: 'Known AI annotation/gig platform' };
+    }
+
+    // Check gig titles
+    if (GIG_TITLE_KEYWORDS.some(k => tLower.includes(k))) {
+      return { isSpam: true, reason: 'AI annotation/gig job title' };
+    }
+
+    // Check hourly dollar rate in Indian job postings
+    if (/\$\s*\d+(?:\.\d+)?\s*(?:\/|\s*per\s*)h(?:ou)?r/i.test(full)) {
+      return { isSpam: true, reason: 'Hourly USD rate gig posting' };
+    }
+
+    return { isSpam: false };
+  }
+
+  // Strict Job Title Relevance Filter
+  function checkTitleRelevance(jobTitle, targetQuery) {
+    if (!targetQuery || !jobTitle) return true;
+    const target = targetQuery.toLowerCase().trim();
+    const title = jobTitle.toLowerCase();
+
+    // Role family: Analyst / Analytics / BI / MIS
+    if (target.includes('analyst') || target.includes('analytics') || target.includes('mis')) {
+      return /\b(analyst|analytics|analysis|bi\b|business intelligence|reporting|insights|mis\b|data)/i.test(title);
+    }
+
+    // Role family: Software / Developer / Engineer
+    if (target.includes('developer') || target.includes('engineer') || target.includes('software')) {
+      return /\b(developer|engineer|software|programmer|sde|frontend|backend|fullstack|full\s*stack|web)\b/i.test(title);
+    }
+
+    // Generic token overlap excluding filler
+    const tokens = target.split(/[\s,]+/).map(t => t.replace(/[^a-z0-9]/g, '')).filter(t => t.length > 2 && !STOPWORDS.has(t));
+    if (tokens.length === 0) return true;
+    return tokens.some(t => title.includes(t));
+  }
+
+  // Negative Keywords Blacklist (Strict Word Boundaries & Dash Normalization)
+  function isBlacklisted(text, blacklistStr) {
+    if (!text || !blacklistStr) return false;
+    const normalized = normalizeText(text).toLowerCase();
+
+    const tokens = blacklistStr
+      .split(/[,;]/)
+      .map(t => t.trim().toLowerCase())
+      .filter(t => t.length > 0);
+
+    return tokens.some(token => {
+      let regex;
+      if (token === 'intern') {
+        regex = /\b(?:intern|interns|internship|internships)\b/i;
+      } else {
+        regex = new RegExp(`\\b${escapeRegex(token)}\\b`, 'i');
+      }
+      return regex.test(normalized);
+    });
+  }
+
+  // Blocked Companies / Consultancies Filter
+  function isCompanyBlocked(companyName, blockedStr) {
+    if (!companyName || !blockedStr) return false;
+    const cLower = companyName.toLowerCase().trim();
+
+    const blockedList = blockedStr
+      .split(/[,;]/)
+      .map(b => b.trim().toLowerCase())
+      .filter(b => b.length > 0);
+
+    return blockedList.some(b => cLower.includes(b));
+  }
+
+  // Strict Location Filter & Regional Aliases
+  function checkLocationMatch(jobLocation, targetLocation) {
+    if (!targetLocation) return true;
+    const target = targetLocation.toLowerCase().trim();
+    const loc = (jobLocation || '').toLowerCase().trim();
+
+    // 1. Countrywide India
+    if (target === 'india' || target === 'all india' || target.includes('all india')) {
       return true;
     }
 
-    const placeholder = String(el.placeholder || (el.getAttribute ? (el.getAttribute('placeholder') || '') : '')).toLowerCase();
-    const ariaLabel = String(el.getAttribute ? (el.getAttribute('aria-label') || '') : '').toLowerCase();
+    // 2. Remote / Hybrid matching
+    if (target.includes('remote') && (loc.includes('remote') || loc.includes('work from home') || loc.includes('wfh'))) {
+      return true;
+    }
 
+    // 3. Delhi NCR Aliases
+    const ncrAliases = ['delhi', 'new delhi', 'ncr', 'gurgaon', 'gurugram', 'noida', 'greater noida', 'faridabad', 'ghaziabad'];
+    if (ncrAliases.some(alias => target.includes(alias))) {
+      return ncrAliases.some(alias => loc.includes(alias)) || loc.includes('remote');
+    }
+
+    // 4. Bengaluru / Bangalore
+    if (target.includes('bangalore') || target.includes('bengaluru')) {
+      return loc.includes('bangalore') || loc.includes('bengaluru') || loc.includes('remote');
+    }
+
+    // 5. Mumbai Metropolitan
+    if (target.includes('mumbai') || target.includes('navi mumbai') || target.includes('thane')) {
+      return loc.includes('mumbai') || loc.includes('navi mumbai') || loc.includes('thane') || loc.includes('remote');
+    }
+
+    // 6. Hyderabad / Secunderabad
+    if (target.includes('hyderabad') || target.includes('secunderabad')) {
+      return loc.includes('hyderabad') || loc.includes('secunderabad') || loc.includes('remote');
+    }
+
+    // 7. Direct containment
+    const cleanTargetTokens = target.split(/[\s,]+/).filter(t => t.length > 2);
+    return cleanTargetTokens.some(t => loc.includes(t)) || loc.includes('remote') || loc.includes('work from home');
+  }
+
+  // ============================================================================
+  // 4. EXPERIENCE REQUIREMENT PARSER
+  // ============================================================================
+  function parseExperienceRequirement(title = '', description = '', badge = '') {
+    const fullText = normalizeText(`${title} \n ${badge} \n ${description}`).toLowerCase();
+
+    // 1. Fresher / 0 years indicators
+    if (/\b(fresher|entry level|intern|trainee|0\s*-\s*1\s*(?:years?|yrs?)|0\s*-\s*2\s*(?:years?|yrs?)|no experience required|freshers(?:\s+are)?\s+welcome)\b/i.test(fullText)) {
+      return 0;
+    }
+
+    // 2. Explicit patterns for required experience
+    const expPatterns = [
+      /(?:experience|exp)\s*(?:required|needed|mandatory)?\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(?:to|-|\+)?\s*(\d+(?:\.\d+)?)?\s*(?:years?|yrs?)/i,
+      /(\d+(?:\.\d+)?)\s*(?:to|-)\s*(\d+(?:\.\d+)?)\s*(?:years?|yrs?)(?:\s+(?:of\s+)?(?:relevant\s+)?experience)?/i,
+      /(\d+(?:\.\d+)?)\s*\+\s*(?:years?|yrs?)(?:\s+(?:of\s+)?(?:relevant\s+)?experience)/i,
+      /(\d+(?:\.\d+)?)\s*(?:years?|yrs?)\s+(?:of\s+)?(?:relevant\s+)?experience/i,
+      /minimum\s*(?:of\s*)?(\d+(?:\.\d+)?)\s*(?:years?|yrs?)/i,
+      /at least\s*(\d+(?:\.\d+)?)\s*(?:years?|yrs?)/i,
+      /(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*yrs/i,
+      /(\d+(?:\.\d+)?)\s*yrs/i
+    ];
+
+    for (const pat of expPatterns) {
+      const match = fullText.match(pat);
+      if (match && match[1]) {
+        const val = parseFloat(match[1]);
+        if (!isNaN(val) && val >= 0 && val <= 30) {
+          return val;
+        }
+      }
+    }
+
+    // 3. Senior role title hints
+    if (/\b(senior|sr\.|lead|manager|principal|architect|director|head of)\b/i.test(title)) {
+      if (!/\b(executive|assistant|junior|jr\.|trainee|associate)\b/i.test(title)) {
+        return 4;
+      }
+    }
+
+    return null; // Unlisted
+  }
+
+  // ============================================================================
+  // 5. SALARY PARSER (INR, LPA & Monthly)
+  // ============================================================================
+  function parseMonthlySalary(salaryStr) {
+    if (!salaryStr) return null;
+    const lower = salaryStr.toLowerCase().replace(/,/g, '');
+
+    // 1. LPA / Lacs format (Naukri standard: "3-6 Lacs PA", "4.5 - 7.5 LPA", "50,000 - 3 Lacs PA")
+    if (lower.includes('lac') || lower.includes('lakh') || lower.includes('lpa')) {
+      const nums = lower.match(/\d+(?:\.\d+)?/g);
+      if (nums && nums.length > 0) {
+        const lpaVals = nums.map(n => parseFloat(n)).filter(n => !isNaN(n) && n > 0 && n < 100);
+        if (lpaVals.length > 0) {
+          const monthlyVals = lpaVals.map(lpa => Math.round((lpa * 100000) / 12));
+          return {
+            minMonthly: Math.min(...monthlyVals),
+            maxMonthly: Math.max(...monthlyVals),
+            isLpa: true
+          };
+        }
+      }
+    }
+
+    // 2. Direct INR / ₹ / Monthly numbers
+    if (lower.includes('₹') || lower.includes('inr') || lower.includes('rs') || lower.includes('per month')) {
+      const nums = lower.match(/\d+/g);
+      if (nums && nums.length > 0) {
+        const parsedVals = nums.map(n => parseInt(n, 10)).filter(n => !isNaN(n) && n > 100);
+        if (parsedVals.length > 0) {
+          const toMonthly = (val) => {
+            if (lower.includes('year') || lower.includes('annum') || val > 80000) {
+              return Math.round(val / 12);
+            }
+            if (lower.includes('month') || lower.includes('pm')) {
+              return val;
+            }
+            return val;
+          };
+          const monthlyVals = parsedVals.map(toMonthly);
+          return {
+            minMonthly: Math.min(...monthlyVals),
+            maxMonthly: Math.max(...monthlyVals),
+            isLpa: false
+          };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  // ============================================================================
+  // 6. POST AGE / FRESHNESS PARSER
+  // ============================================================================
+  function parseJobAgeDays(text) {
+    if (!text || typeof text !== 'string') return null;
+    const lower = text.toLowerCase().trim();
+
+    // 1. Immediate / Today / Hours
     if (
-      ariaLabel.includes('search job') ||
-      ariaLabel.includes('search location') ||
-      ariaLabel.includes('search skills') ||
-      ariaLabel.startsWith('search') ||
-      placeholder.includes('skills, designations') ||
-      placeholder.includes('enter keyword') ||
-      placeholder.includes('enter location') ||
-      placeholder.includes('search jobs')
+      lower.includes('just now') ||
+      lower.includes('today') ||
+      lower.includes('few hours') ||
+      lower.includes('hour ago') ||
+      lower.includes('hours ago') ||
+      lower.includes('mins ago') ||
+      lower.includes('minutes ago')
     ) {
-      return true;
+      return 0;
     }
 
-    return false;
-  }
-
-  /**
-   * Check if element belongs strictly to Naukri's main top navigation search bar
-   */
-  function isSearchInput(el) {
-    if (!el) return false;
-
-    // If inside an active application container, drawer wrapper, or modal, it is NEVER a header search bar!
-    if (typeof el.closest === 'function' && el.closest('.drawer-wrapper, .apply-drawer, .chatbot-container, .modal-container, form[name*="apply"]')) {
-      return false;
+    // 2. Day(s) ago: "1 Day Ago", "3 Days Ago", "30+ Days Ago"
+    if (lower.includes('30+ day') || lower.includes('30+ days') || lower.includes('> 30 days')) {
+      return 31;
     }
 
-    if (isNonApplicationInput(el)) return true;
-
-    const searchForm = typeof el.closest === 'function' ? el.closest('form[name="searchForm"], .nMainNavbar, .search-box, nav, header') : null;
-    if (searchForm) return true;
-
-    return false;
-  }
-
-  /**
-   * Helper to safely extract nested value from object path (e.g. 'work.currentRole.jobTitle')
-   */
-  function getNestedValue(obj, path) {
-    if (!obj || !path) return null;
-    const keys = path.split('.');
-    let current = obj;
-    for (const key of keys) {
-      if (current[key] === undefined || current[key] === null) return null;
-      current = current[key];
-    }
-    return current;
-  }
-
-  /**
-   * Find label text associated with a given input element
-   */
-  function getElementLabelText(el) {
-    if (!el) return '';
-    let labelTexts = [];
-    const doc = el.ownerDocument || (typeof document !== 'undefined' ? document : null);
-
-    // 1. Explicit <label for="id">
-    if (el.id && typeof el.id === 'string' && doc && typeof doc.querySelector === 'function') {
-      const escapedId = (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(el.id) : el.id.replace(/([^\w-])/g, '\\$1');
-      const labelEl = doc.querySelector(`label[for="${escapedId}"]`);
-      if (labelEl && labelEl.textContent) labelTexts.push(labelEl.textContent);
+    const dayMatch = lower.match(/(\d+)\s*\+?\s*days?\s*ago/);
+    if (dayMatch && dayMatch[1]) {
+      const d = parseInt(dayMatch[1], 10);
+      if (!isNaN(d)) return d;
     }
 
-    // 2. Parent <label>
-    const parentLabel = typeof el.closest === 'function' ? el.closest('label') : null;
-    if (parentLabel && parentLabel.textContent) {
-      labelTexts.push(parentLabel.textContent);
-    }
-
-    // 3. Preceding / Nearby sibling header or legend or aria-labelledby
-    const ariaLabelledBy = el.getAttribute ? el.getAttribute('aria-labelledby') : null;
-    if (ariaLabelledBy && typeof ariaLabelledBy === 'string' && doc && typeof doc.getElementById === 'function') {
-      const ids = ariaLabelledBy.trim().split(/\s+/);
-      for (const id of ids) {
-        if (id) {
-          const target = doc.getElementById(id);
-          if (target && target.textContent) {
-            labelTexts.push(target.textContent);
-          }
-        }
-      }
-    }
-
-    // 4. aria-label, placeholder, name, id, and data-testid
-    if (el.getAttribute && el.getAttribute('aria-label')) labelTexts.push(String(el.getAttribute('aria-label')));
-    if (el.getAttribute && el.getAttribute('data-testid')) labelTexts.push(String(el.getAttribute('data-testid')));
-    if (el.placeholder) labelTexts.push(String(el.placeholder));
-    if (el.name) labelTexts.push(String(el.name));
-    if (el.id) labelTexts.push(String(el.id));
-
-    // 5. Closest container section header / legend / question text on Naukri
-    if (typeof el.closest === 'function') {
-      const container = el.closest('.question-container, .form-group, .input-field, fieldset, form > div, div[class*="Question"], div[class*="field"], div[class*="group"]');
-      if (container && typeof container.querySelector === 'function') {
-        const header = container.querySelector('h1, h2, h3, h4, legend, label, span[class*="label"], div[class*="header"], p[class*="title"]');
-        if (header && header.textContent) labelTexts.push(header.textContent);
-      }
-    }
-
-    return labelTexts.join(' ').toLowerCase().replace(/\s+/g, ' ').trim();
-  }
-
-  /**
-   * Match an input element to user profile value
-   */
-  function matchField(el, profile) {
-    if (!profile) return null;
-
-    if (isSearchInput(el)) return null;
-
-    const labelText = getElementLabelText(el);
-    if (!labelText) return null;
-
-    // Check direct dictionary mappings
-    for (const mapping of FIELD_MAPPINGS) {
-      for (const key of mapping.keys) {
-        if (labelText.includes(key)) {
-          const val = getNestedValue(profile, mapping.path);
-          if (val) return { value: val, confidence: 0.95, keyMatched: key };
-        }
-      }
-    }
-
-    // Check learnedAnswers object
-    if (profile.learnedAnswers && typeof profile.learnedAnswers === 'object') {
-      for (const [key, val] of Object.entries(profile.learnedAnswers)) {
-        if (key && val && (labelText.includes(key.toLowerCase()) || key.toLowerCase().includes(labelText))) {
-          return { value: val, confidence: 0.9, keyMatched: key };
-        }
-      }
-    }
-
-    // Check screening Q&A bank
-    if (profile.screening && Array.isArray(profile.screening)) {
-      for (const item of profile.screening) {
-        if (!item || typeof item.keywords !== 'string') continue;
-        const keywords = item.keywords.toLowerCase().split(',').map(k => k.trim());
-        for (const kw of keywords) {
-          if (kw && labelText.includes(kw)) {
-            return { value: item.answer, confidence: 0.85, keyMatched: kw };
-          }
-        }
-      }
+    // 3. Month(s) ago
+    const monthMatch = lower.match(/(\d+)\s*months?\s*ago/);
+    if (monthMatch && monthMatch[1]) {
+      const m = parseInt(monthMatch[1], 10);
+      if (!isNaN(m)) return m * 30;
     }
 
     return null;
   }
 
-  /**
-   * Locate Naukri's global search bar container
-   */
-  function findSearchContainer(doc) {
-    const scope = doc || (typeof document !== 'undefined' ? document : null);
-    if (!scope || typeof scope.querySelector !== 'function') return null;
-    return scope.querySelector('form[name="searchForm"], .nMainNavbar, .search-box, .qsbWrapper, div[class*="qsb"]');
-  }
-
-  /**
-   * Locate Naukri's keyword (#qsb-keys-sug) and location (#qsb-location-sug) search inputs
-   */
-  function getSearchInputs(containerOrDoc) {
-    const scope = containerOrDoc || (typeof document !== 'undefined' ? document : null);
-    if (!scope || typeof scope.querySelector !== 'function') return { keywordInput: null, locationInput: null };
-
-    const keywordInput = scope.querySelector(
-      '#qsb-keys-sug, input[name="qp"], input[placeholder*="skills" i], input[placeholder*="designations" i]'
-    );
-    const locationInput = scope.querySelector(
-      '#qsb-location-sug, input[name="ql"], input[placeholder*="location" i]'
-    );
-
-    return { keywordInput, locationInput };
-  }
-
-  /**
-   * Safely extract job title/keywords and target location from profile with fallback unwrap
-   */
-  function extractSearchFillData(profile) {
-    if (!profile) return { keywords: '', location: '' };
-
-    const keywords = String(
-      profile.work?.targetRole?.jobTitle ||
-      profile.work?.currentRole?.jobTitle ||
-      profile.work?.recentJobTitle ||
-      profile.recentJobTitle ||
-      profile.work?.targetRole?.keySkills ||
-      ''
-    ).trim();
-
-    const location = String(
-      profile.work?.targetRole?.targetLocation ||
-      profile.personal?.city ||
-      profile.city ||
-      ''
-    ).trim();
-
-    return { keywords, location };
-  }
-
-  /**
-   * Check if location hostname is a naukri.com domain
-   */
-  function isNaukriPage(hostname) {
-    if (!hostname) return false;
-    const host = String(hostname).toLowerCase().trim();
-    return typeof host === 'string' && (host === 'naukri.com' || host.endsWith('.naukri.com'));
-  }
-
-  /**
-   * Safely set value on HTMLInputElement using native property setter and dispatch React/DOM events
-   */
-  function setNativeInputValue(input, value) {
-    if (!input || value === undefined || value === null) return false;
-    if (input && (input.disabled || input.readOnly)) return false;
-    const valueStr = String(value);
-
-    const prototype = (typeof window !== 'undefined' && window.HTMLInputElement && window.HTMLInputElement.prototype)
-      ? window.HTMLInputElement.prototype
-      : (typeof HTMLInputElement !== 'undefined' ? HTMLInputElement.prototype : null);
-
-    const descriptor = prototype ? Object.getOwnPropertyDescriptor(prototype, 'value') : null;
-    const setter = descriptor ? descriptor.set : null;
-
-    if (setter) {
-      setter.call(input, valueStr);
-    } else {
-      input.value = valueStr;
-    }
-
-    if (input._valueTracker && typeof input._valueTracker.setValue === 'function') {
-      input._valueTracker.setValue('');
-    }
-
-    const EventClass = (typeof window !== 'undefined' && window.Event) ? window.Event : (typeof Event !== 'undefined' ? Event : null);
-    if (EventClass && typeof input.dispatchEvent === 'function') {
-      input.dispatchEvent(new EventClass('input', { bubbles: true }));
-      input.dispatchEvent(new EventClass('change', { bubbles: true }));
-      input.dispatchEvent(new EventClass('blur', { bubbles: true }));
-    }
-
-    return true;
-  }
-
-  const SpeedFillMatcher = {
-    matchField,
-    getElementLabelText,
-    isSearchInput,
-    getAppContainer,
-    isInsideExcludedContainer,
-    isNonApplicationInput,
-    findSearchContainer,
-    getSearchInputs,
-    extractSearchFillData,
-    isNaukriPage,
-    setNativeInputValue,
-    CONTAINER_SELECTORS,
-    EXCLUDED_CONTAINER_SELECTORS,
-    EXCLUDED_ELEMENT_IDS,
-    EXCLUDED_ELEMENT_NAMES
+  // Export to window / module
+  const NaukriMatcher = {
+    findScreeningAnswer,
+    normalizeDegreeCategory,
+    normalizeNoticePeriod,
+    extractRecruiterContact,
+    isAiGigSpam,
+    checkTitleRelevance,
+    isBlacklisted,
+    isCompanyBlocked,
+    checkLocationMatch,
+    parseExperienceRequirement,
+    parseMonthlySalary,
+    parseJobAgeDays,
+    normalizeText
   };
 
   if (typeof window !== 'undefined') {
-    window.SpeedFillMatcher = SpeedFillMatcher;
+    window.NaukriMatcher = NaukriMatcher;
   }
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = SpeedFillMatcher;
+    module.exports = NaukriMatcher;
   }
 })();

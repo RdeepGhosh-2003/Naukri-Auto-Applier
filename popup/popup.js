@@ -1,640 +1,859 @@
 /**
- * Naukri SpeedFill - Popup Controller
+ * Naukri Automated Job Application - Popup Dashboard Controller
+ * Handles session controls, live stats, multi-role query queue,
+ * recruiter contact badges & filters, Q&A bank editor, analytics, and CSV exports.
  */
 
-document.addEventListener('DOMContentLoaded', () => {
-  const versionEl = document.getElementById('speedfill-version');
-  if (versionEl && chrome.runtime?.getManifest) {
-    versionEl.textContent = 'v' + chrome.runtime.getManifest().version;
-  }
-
+document.addEventListener('DOMContentLoaded', async () => {
   // Elements
-  const tabBtns = document.querySelectorAll('.tab-btn');
-  const tabPanes = document.querySelectorAll('.tab-pane');
-  const saveBtn = document.getElementById('save-btn');
-  const addQaBtn = document.getElementById('add-qa-btn');
-  const resetDefaultsBtn = document.getElementById('reset-defaults-btn');
-  const qaContainer = document.getElementById('qa-container');
-  const toast = document.getElementById('toast');
-  const stepDelayInput = document.getElementById('stepDelayMs');
-  const stepDelayDisplay = document.getElementById('stepDelayDisplay');
   const themeToggleBtn = document.getElementById('theme-toggle-btn');
-  const colorPalette = document.getElementById('color-palette');
-  
-  // 14 Curated Professional Vibrant Colors (Tailwind 500/600 shades)
-  const presetColors = [
-    '#3b82f6', // Blue (Default)
-    '#0ea5e9', // Sky
-    '#06b6d4', // Cyan
-    '#14b8a6', // Teal
-    '#10b981', // Emerald
-    '#84cc16', // Lime
-    '#eab308', // Amber
-    '#f97316', // Orange
-    '#ef4444', // Red
-    '#f43f5e', // Rose
-    '#ec4899', // Pink
-    '#d946ef', // Fuchsia
-    '#8b5cf6', // Violet
-    '#6366f1'  // Indigo
-  ];
+  const sessionBadge = document.getElementById('session-badge');
+  const btnStart = document.getElementById('btn-start');
+  const btnResume = document.getElementById('btn-resume');
+  const btnStop = document.getElementById('btn-stop');
+  const btnClearLogs = document.getElementById('btn-clear-logs');
+  const consoleLogs = document.getElementById('console-logs');
 
-  let currentProfile = {};
+  const metricScanned = document.getElementById('metric-scanned');
+  const metricApplied = document.getElementById('metric-applied');
+  const metricSaved = document.getElementById('metric-saved');
+  const metricSkipped = document.getElementById('metric-skipped');
 
-  // Slider input listener for live text badge update
-  stepDelayInput?.addEventListener('input', (e) => {
-    if (stepDelayDisplay) {
-      stepDelayDisplay.textContent = `${e.target.value} ms`;
-    }
-  });
+  const progressText = document.getElementById('progress-text');
+  const progressBarFill = document.getElementById('progress-bar-fill');
 
-  // Saved Quick Searches: Add New Search button
-  document.getElementById('add-search-btn')?.addEventListener('click', () => {
-    appendSearchBlock({});
-  });
+  // Rules elements
+  const ruleQuery = document.getElementById('rule-query');
+  const ruleLocation = document.getElementById('rule-location');
+  const ruleFreshness = document.getElementById('rule-freshness');
+  const ruleExp = document.getElementById('rule-exp');
+  const ruleSalary = document.getElementById('rule-salary');
+  const ruleUnlistedExp = document.getElementById('rule-unlisted-exp');
+  const ruleBlacklist = document.getElementById('rule-blacklist');
+  const ruleCompanyBlacklist = document.getElementById('rule-company-blacklist');
+  const ruleTargetResume = document.getElementById('rule-target-resume');
+  const ruleStrictLocation = document.getElementById('rule-strict-location');
+  const ruleSaveContact = document.getElementById('rule-save-contact');
+  const ruleBlockSpam = document.getElementById('rule-block-spam');
+  const ruleTitleRelevance = document.getElementById('rule-title-relevance');
+  const ruleDelay = document.getElementById('rule-delay');
+  const ruleMaxJobs = document.getElementById('rule-max-jobs');
+  const btnSaveRules = document.getElementById('btn-save-rules');
 
-  // Tab Navigation Handler
-  tabBtns.forEach(btn => {
+  // Profile elements
+  const profFullName = document.getElementById('prof-fullname');
+  const profPhone = document.getElementById('prof-phone');
+  const profEmail = document.getElementById('prof-email');
+  const profCity = document.getElementById('prof-city');
+  const profCurrTitle = document.getElementById('prof-curr-title');
+  const profCurrCompany = document.getElementById('prof-curr-company');
+  const profYearsExp = document.getElementById('prof-years-exp');
+  const profNotice = document.getElementById('prof-notice');
+  const profCurrCtc = document.getElementById('prof-curr-ctc');
+  const profExpectedCtc = document.getElementById('prof-expected-ctc');
+  const btnSaveProfile = document.getElementById('btn-save-profile');
+
+  // Screening Q&A elements
+  const qaListContainer = document.getElementById('qa-list-container');
+  const btnOpenAddQa = document.getElementById('btn-open-add-qa');
+  const qaFormContainer = document.getElementById('qa-form-container');
+  const qaFormTitle = document.getElementById('qa-form-title');
+  const qaEditIndex = document.getElementById('qa-edit-index');
+  const qaInputKeywords = document.getElementById('qa-input-keywords');
+  const qaInputAnswer = document.getElementById('qa-input-answer');
+  const btnCancelQa = document.getElementById('btn-cancel-qa');
+  const btnSaveQa = document.getElementById('btn-save-qa');
+
+  // Saved / Applied elements
+  const viewSavedBtn = document.getElementById('view-saved-btn');
+  const viewAppliedBtn = document.getElementById('view-applied-btn');
+  const savedSubview = document.getElementById('saved-subview');
+  const appliedSubview = document.getElementById('applied-subview');
+  const savedJobsContainer = document.getElementById('saved-jobs-container');
+  const appliedJobsContainer = document.getElementById('applied-jobs-container');
+  const savedCountBadge = document.getElementById('saved-count-badge');
+  const savedTabCount = document.getElementById('saved-tab-count');
+  const appliedTabCount = document.getElementById('applied-tab-count');
+  const savedSearchInput = document.getElementById('saved-search-input');
+  const appliedSearchInput = document.getElementById('applied-search-input');
+  const filterContactOnlyBtn = document.getElementById('filter-contact-only');
+  const btnExportSaved = document.getElementById('btn-export-saved');
+  const btnClearSaved = document.getElementById('btn-clear-saved');
+  const btnExportApplied = document.getElementById('btn-export-applied');
+  const btnClearApplied = document.getElementById('btn-clear-applied');
+
+  // Analytics elements
+  const periodBtns = document.querySelectorAll('.period-btn');
+  const logsPeriodLabel = document.getElementById('logs-period-label');
+  const logsSessionsCount = document.getElementById('logs-sessions-count');
+  const logsProgressTitle = document.getElementById('logs-progress-title');
+  const logsProgressText = document.getElementById('logs-progress-text');
+  const logsProgressBarFill = document.getElementById('logs-progress-bar-fill');
+  const logsMetricScanned = document.getElementById('logs-metric-scanned');
+  const logsMetricApplied = document.getElementById('logs-metric-applied');
+  const logsMetricSaved = document.getElementById('logs-metric-saved');
+  const logsMetricSkipped = document.getElementById('logs-metric-skipped');
+  const logsBreakdownContainer = document.getElementById('logs-breakdown-container');
+  const btnExportLogs = document.getElementById('btn-export-logs');
+  const btnClearHistory = document.getElementById('btn-clear-history');
+
+  let currentLogsPeriod = 'daily';
+  let filterContactOnly = false;
+
+  // Tab switching
+  const tabButtons = document.querySelectorAll('.nav-tab-btn');
+  const tabPanes = document.querySelectorAll('.tab-pane');
+
+  tabButtons.forEach(btn => {
     btn.addEventListener('click', () => {
-      tabBtns.forEach(b => b.classList.remove('active'));
+      tabButtons.forEach(b => b.classList.remove('active'));
       tabPanes.forEach(p => p.classList.remove('active'));
 
       btn.classList.add('active');
-      const tabId = btn.getAttribute('data-tab');
-      document.getElementById(tabId)?.classList.add('active');
+      const target = document.getElementById(btn.dataset.tab);
+      if (target) target.classList.add('active');
+
+      if (btn.dataset.tab === 'tab-saved') renderJobs();
+      if (btn.dataset.tab === 'tab-logs') renderAnalytics(currentLogsPeriod);
+      if (btn.dataset.tab === 'tab-profile') renderQAList();
     });
   });
 
-  // Load stored profile into UI
-  function loadProfileData() {
-    chrome.storage.local.get(['userProfile'], (result) => {
-      if (result && result.userProfile) {
-        currentProfile = result.userProfile;
-        populateForm(currentProfile);
-        applyTheme(currentProfile.settings?.theme || 'dark');
-        applyPrimaryColor(currentProfile.settings?.primaryColor || '#3b82f6');
-      } else {
-        resetToDefaultJson();
-      }
-    });
-  }
+  // Reconcile and load data
+  chrome.runtime.sendMessage({ action: 'RECONCILE_STATS' }).catch(() => {});
 
-  function applyTheme(theme) {
-    if (theme === 'light') {
-      document.body.classList.add('light-theme');
-      if (themeToggleBtn) themeToggleBtn.textContent = '☀️';
+  let userProfile = null;
+  async function loadInitialData() {
+    const data = await chrome.storage.local.get([
+      'userProfile',
+      'autoApplySession',
+      'sessionLogs',
+      'savedJobs',
+      'appliedJobs',
+      'theme'
+    ]);
+
+    if (data.theme === 'light') {
+      document.body.setAttribute('data-theme', 'light');
+      themeToggleBtn.textContent = '☀️';
+    }
+
+    if (data.userProfile) {
+      userProfile = data.userProfile;
+      populateProfileAndRules(userProfile);
     } else {
-      document.body.classList.remove('light-theme');
-      if (themeToggleBtn) themeToggleBtn.textContent = '🌙';
-    }
-    
-    // Recalculate text contrast colors for the new theme
-    if (currentProfile.settings?.primaryColor) {
-      applyPrimaryColor(currentProfile.settings.primaryColor);
-    }
-  }
-
-  themeToggleBtn?.addEventListener('click', () => {
-    const isLight = document.body.classList.toggle('light-theme');
-    const newTheme = isLight ? 'light' : 'dark';
-    if (themeToggleBtn) themeToggleBtn.textContent = isLight ? '☀️' : '🌙';
-    
-    if (!currentProfile.settings) currentProfile.settings = {};
-    currentProfile.settings.theme = newTheme;
-    chrome.storage.local.set({ userProfile: currentProfile });
-  });
-
-  function hexToRgb(hex) {
-    if(!hex) return [59, 130, 246]; // default blue
-    let c;
-    if(/^#([A-Fa-f0-9]{3}){1,2}$/.test(hex)){
-        c = hex.substring(1).split('');
-        if(c.length === 3){
-            c = [c[0], c[0], c[1], c[1], c[2], c[2]];
-        }
-        c = '0x' + c.join('');
-        return [(c>>16)&255, (c>>8)&255, c&255];
-    }
-    return [59, 130, 246];
-  }
-
-  function applyPrimaryColor(color) {
-    document.documentElement.style.setProperty('--primary', color);
-
-    // Calculate dynamic safe text colors based on YIQ lightness
-    const rgb = hexToRgb(color);
-    document.documentElement.style.setProperty('--primary-rgb', `${rgb[0]}, ${rgb[1]}, ${rgb[2]}`);
-
-    const yiq = ((rgb[0]*299)+(rgb[1]*587)+(rgb[2]*114))/1000;
-    
-    // 1. Contrast text for buttons
-    const contrastText = (yiq >= 128) ? '#0f172a' : '#ffffff';
-    document.documentElement.style.setProperty('--primary-contrast-text', contrastText);
-
-    // 2. Safe text color for labels
-    const isLightMode = document.body.classList.contains('light-theme');
-    let safeText = color;
-    if (!isLightMode && yiq < 100) safeText = '#ffffff'; // Too dark for dark mode -> white
-    if (isLightMode && yiq > 150) safeText = '#0f172a'; // Too light for light mode -> dark slate
-    document.documentElement.style.setProperty('--primary-text-safe', safeText);
-
-    // Update palette active state
-    if (colorPalette) {
-      const dots = colorPalette.querySelectorAll('.color-dot');
-      dots.forEach(dot => {
-        if (dot.dataset.color.toLowerCase() === color.toLowerCase()) {
-          dot.classList.add('active');
-        } else {
-          dot.classList.remove('active');
-        }
-      });
-    }
-  }
-
-  // Render color palette
-  if (colorPalette) {
-    presetColors.forEach(color => {
-      const dot = document.createElement('div');
-      dot.className = 'color-dot';
-      dot.style.backgroundColor = color;
-      dot.dataset.color = color;
-      
-      dot.addEventListener('click', () => {
-        applyPrimaryColor(color);
-        if (!currentProfile.settings) currentProfile.settings = {};
-        currentProfile.settings.primaryColor = color;
-        chrome.storage.local.set({ userProfile: currentProfile });
-      });
-      
-      colorPalette.appendChild(dot);
-    });
-  }
-
-  function resetToDefaultJson() {
-    fetch(chrome.runtime.getURL('data/default_profile.json'))
-      .then(res => res.json())
-      .then(data => {
-        currentProfile = data;
-        chrome.storage.local.set({ userProfile: data }, () => {
-          populateForm(data);
-          showToast('Profile Reset to Defaults!');
+      fetch(chrome.runtime.getURL('data/default_profile.json'))
+        .then(res => res.json())
+        .then(def => {
+          userProfile = def;
+          chrome.storage.local.set({ userProfile: def });
+          populateProfileAndRules(def);
         });
-      });
+    }
+
+    if (data.autoApplySession) {
+      updateSessionUI(data.autoApplySession);
+    }
+
+    if (data.sessionLogs) {
+      renderLogs(data.sessionLogs);
+    }
+
+    renderJobs();
+    renderAnalytics('daily');
   }
 
-  // Populate HTML inputs from profile object
-  function populateForm(profile) {
-    // Current Role
-    document.getElementById('currentJobTitle').value = profile.work?.currentRole?.jobTitle || '';
-    document.getElementById('currentCompany').value = profile.work?.currentRole?.company || '';
-    document.getElementById('yearsExperience').value = profile.work?.currentRole?.yearsExperience || '';
-    document.getElementById('currentSalary').value = profile.work?.currentRole?.currentSalary || '';
+  // Populate rules and profile inputs
+  function populateProfileAndRules(prof) {
+    if (!prof) return;
 
-    // Personal
-    document.getElementById('fullName').value = profile.personal?.fullName || '';
-    document.getElementById('firstName').value = profile.personal?.firstName || '';
-    document.getElementById('lastName').value = profile.personal?.lastName || '';
-    document.getElementById('email').value = profile.personal?.email || '';
-    document.getElementById('phone').value = profile.personal?.phone || '';
-    document.getElementById('city').value = profile.personal?.city || '';
-    if (document.getElementById('gender')) document.getElementById('gender').value = profile.personal?.gender || '';
-    document.getElementById('linkedin').value = profile.personal?.linkedin || '';
-    document.getElementById('coverLetterInstructions').value = profile.personal?.coverLetterInstructions || '';
+    // Rules
+    const r = prof.autoApplierSettings || {};
+    ruleQuery.value = r.targetJobQuery || '';
+    ruleLocation.value = r.targetLocation || '';
+    ruleFreshness.value = r.jobFreshness !== undefined ? String(r.jobFreshness) : '1';
+    ruleExp.value = r.userYearsExp !== undefined ? r.userYearsExp : 1;
+    ruleSalary.value = r.minMonthlySalary || 25000;
+    ruleUnlistedExp.value = r.unlistedExpAction || 'apply';
+    ruleBlacklist.value = r.blacklistKeywords || '';
+    ruleCompanyBlacklist.value = r.blockedCompanies || '';
+    ruleTargetResume.value = prof.work?.targetRole?.targetResumeName || '';
+    ruleStrictLocation.checked = r.strictLocation !== false;
+    ruleSaveContact.checked = r.saveContactJobs !== false;
+    ruleBlockSpam.checked = r.blockAiSpam !== false;
+    ruleTitleRelevance.checked = r.matchTitleRelevance !== false;
+    ruleDelay.value = r.stepDelayMs || 1200;
+    ruleMaxJobs.value = r.maxJobsPerSession || 25;
 
-    // Education
-    document.getElementById('degree').value = profile.education?.degree || '';
-    document.getElementById('major').value = profile.education?.major || '';
-    document.getElementById('university').value = profile.education?.university || '';
-    document.getElementById('graduationYear').value = profile.education?.graduationYear || '';
+    // Profile
+    const p = prof.personal || {};
+    profFullName.value = p.fullName || '';
+    profPhone.value = p.phone || '';
+    profEmail.value = p.email || '';
+    profCity.value = p.city || '';
 
-    // Settings
-    document.getElementById('autoFillOnLoad').checked = profile.settings?.autoFillOnLoad !== false;
-    document.getElementById('pauseOnUnmatchedFields').checked = profile.settings?.pauseOnUnmatchedFields !== false;
-    document.getElementById('autoSelectResume').checked = profile.settings?.autoSelectResume !== false;
-    document.getElementById('autoAdvanceStep').checked = profile.settings?.autoAdvanceStep !== false;
-    document.getElementById('autoSubmitApplication').checked = profile.settings?.autoSubmitApplication !== false;
-    document.getElementById('highlightFilledFields').checked = profile.settings?.highlightFilledFields !== false;
-    document.getElementById('geminiApiKey').value = profile.settings?.geminiApiKey || '';
+    const w = prof.work || {};
+    profCurrTitle.value = w.currentRole?.jobTitle || '';
+    profCurrCompany.value = w.currentRole?.company || '';
+    profYearsExp.value = w.currentRole?.yearsExperience || 1;
+    profNotice.value = w.targetRole?.noticePeriod || 'Immediate';
+    profCurrCtc.value = w.currentRole?.currentSalary || '';
+    profExpectedCtc.value = w.targetRole?.expectedSalary || '';
 
-    const delayVal = profile.settings?.stepDelayMs !== undefined ? profile.settings.stepDelayMs : 500;
-    if (stepDelayInput) stepDelayInput.value = delayVal;
-    if (stepDelayDisplay) stepDelayDisplay.textContent = `${delayVal} ms`;
-
-    // Q&A Bank
-    renderQaCards(profile.screening || []);
-
-    // Learned Bot Answers
-    renderLearnedAnswers(profile);
-
-    // Saved Quick Searches — render dynamic blocks
-    renderSearchBlocks(
-      Array.isArray(profile.savedSearches) ? profile.savedSearches : []
-    );
+    renderQAList();
   }
 
-  /**
-   * Render dynamically learned Chatbot questions & answers UI section
-   */
-  function renderLearnedAnswers(profile) {
-    const container = document.getElementById('learned-qa-list');
-    if (!container) return;
-    container.innerHTML = ''; // Clear existing
+  // Update session controls and counters
+  function updateSessionUI(session) {
+    if (!session) return;
+    const isRunning = Boolean(session.isRunning);
 
-    const screeningData = profile?.screening || [];
+    if (isRunning) {
+      sessionBadge.textContent = 'Running';
+      sessionBadge.className = 'status-badge status-running';
+      btnStart.disabled = true;
+      btnStop.disabled = false;
+    } else {
+      sessionBadge.textContent = 'Ready';
+      sessionBadge.className = 'status-badge status-idle';
+      btnStart.disabled = false;
+      btnStop.disabled = true;
+    }
 
-    if (screeningData.length === 0) {
-      container.innerHTML = '<div style="color: #64748b; font-size: 12px; font-style: italic;">No questions learned yet.</div>';
+    const stats = session.stats || { scanned: 0, applied: 0, saved: 0, skipped: 0 };
+    metricScanned.textContent = stats.scanned || 0;
+    metricApplied.textContent = stats.applied || 0;
+    metricSaved.textContent = stats.saved || 0;
+    metricSkipped.textContent = stats.skipped || 0;
+
+    const maxJobs = session.settings?.maxJobsPerSession || 25;
+    progressText.textContent = `${stats.applied || 0} / ${maxJobs} Jobs`;
+    const pct = Math.min(100, Math.round(((stats.applied || 0) / maxJobs) * 100));
+    progressBarFill.style.width = `${pct}%`;
+  }
+
+  // Render logs
+  function renderLogs(logs) {
+    if (!logs || logs.length === 0) {
+      consoleLogs.innerHTML = '<div class="log-entry log-info">[System] Naukri Auto-Applier ready.</div>';
       return;
     }
-
-    screeningData.forEach((item, index) => {
-      // Skip if it doesn't have dynamically learned keywords
-      if (!item || !item.keywords || !item.answer) return;
-
-      const card = document.createElement('div');
-      card.style.cssText = 'background: #1e293b; padding: 8px; border-radius: 6px; position: relative; border: 1px solid #334155;';
-
-      card.innerHTML = `
-        <div style="font-size: 11px; color: #cbd5e1; margin-bottom: 4px; padding-right: 20px;"><strong>Q:</strong> ${item.keywords}</div>
-        <div style="font-size: 12px; color: #10b981;"><strong>A:</strong> ${item.answer}</div>
-        <button class="delete-qa-btn" data-index="${index}" title="Delete this answer" style="position: absolute; top: 6px; right: 6px; background: transparent; border: none; cursor: pointer; color: #ef4444; font-size: 14px;">×</button>
-      `;
-      container.appendChild(card);
-    });
-
-    // Attach delete listeners
-    document.querySelectorAll('#learned-qa-list .delete-qa-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const idx = parseInt(e.target.getAttribute('data-index'));
-        const item = currentProfile?.screening?.[idx];
-        if (item && item.keywords) {
-          const keywordToRemove = item.keywords;
-          if (currentProfile.learnedAnswers && currentProfile.learnedAnswers[keywordToRemove]) {
-            delete currentProfile.learnedAnswers[keywordToRemove];
-          }
-        }
-        if (currentProfile?.screening) {
-          currentProfile.screening.splice(idx, 1);
-        }
-
-        chrome.storage.local.set({ userProfile: currentProfile }, () => {
-          renderLearnedAnswers(currentProfile); // Re-render instantly
-          renderQaCards(currentProfile.screening || []); // Sync Q&A tab list
-        });
-      });
-    });
+    consoleLogs.innerHTML = logs.map(l => {
+      const cls = l.type === 'success' ? 'log-success' :
+                  l.type === 'warning' ? 'log-warning' :
+                  l.type === 'error' ? 'log-error' : 'log-info';
+      return `<div class="log-entry ${cls}">[${l.timestamp}] ${escapeHtml(l.message)}</div>`;
+    }).join('');
+    consoleLogs.scrollTop = consoleLogs.scrollHeight;
   }
 
-  /**
-   * Render all search-block cards from an array of { role, location, experience } objects.
-   */
-  function renderSearchBlocks(searches) {
-    const container = document.getElementById('saved-searches-container');
-    if (!container) return;
-    container.innerHTML = '';
-    const list = searches.length > 0 ? searches : [{}]; // always at least 1 empty block
-    list.forEach(item => appendSearchBlock(item));
-  }
-
-  /**
-   * Append a single styled search-block card to #saved-searches-container.
-   * Design mirrors the "Target Role & Skills" card (same form-group, form-grid classes).
-   */
-  function appendSearchBlock(item = {}) {
-    const container = document.getElementById('saved-searches-container');
-    if (!container) return;
-
-    const block = document.createElement('div');
-    block.className = 'search-block';
-    block.style.cssText = [
-      'margin-bottom:10px',
-      'padding:14px 16px',
-      'background:var(--bg-input)',
-      'border:1px solid rgba(56,189,248,0.25)',
-      'border-radius:var(--radius-sm)',
-      'position:relative'
-    ].join(';');
-
-    const blockNum = container.querySelectorAll('.search-block').length + 1;
-
-    block.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-        <span class="search-block-label" style="font-size:12px;font-weight:700;color:#38bdf8;letter-spacing:0.3px;">
-          🔍 Search #${blockNum}
-        </span>
-        <button class="delete-search-btn" type="button"
-          style="background:rgba(248,113,113,0.12);border:1px solid rgba(248,113,113,0.3);
-                 color:#f87171;border-radius:6px;padding:3px 9px;font-size:11px;
-                 cursor:pointer;line-height:1.4;">
-          🗑️ Remove
-        </button>
-      </div>
-      <div class="form-group">
-        <label>Target Job Title / Role</label>
-        <input type="text" class="ss-role"
-          value="${escapeHtml(item.role || '')}"
-          placeholder="e.g. Data Analyst">
-      </div>
-      <div class="form-grid">
-        <div class="form-group">
-          <label>Location</label>
-          <input type="text" class="ss-location"
-            value="${escapeHtml(item.location || '')}"
-            placeholder="e.g. Bengaluru">
-        </div>
-        <div class="form-group">
-          <label>Experience (Years)</label>
-          <input type="text" class="ss-experience"
-            value="${escapeHtml(item.experience || '')}"
-            placeholder="e.g. 2">
-        </div>
-      </div>
-    `;
-
-    // Remove this block and re-number remaining ones
-    block.querySelector('.delete-search-btn').addEventListener('click', () => {
-      block.remove();
-      container.querySelectorAll('.search-block').forEach((b, i) => {
-        const lbl = b.querySelector('.search-block-label');
-        if (lbl) lbl.textContent = `🔍 Search #${i + 1}`;
-      });
-    });
-
-    container.appendChild(block);
-  }
-
-  // Render Q&A screening cards
-  function renderQaCards(screeningList) {
-    qaContainer.innerHTML = '';
-    screeningList.forEach((item, index) => {
-      const card = document.createElement('div');
-      card.className = 'qa-card';
-      card.innerHTML = `
-        <button class="delete-btn" data-index="${index}">✕</button>
-        <div class="form-group">
-          <label>Question Keywords (comma separated)</label>
-          <input type="text" class="qa-keywords" value="${escapeHtml(item.keywords)}" placeholder="e.g. ctc, notice period, relocation">
-        </div>
-        <div class="form-group">
-          <label>Pre-Saved Answer</label>
-          <input type="text" class="qa-answer" value="${escapeHtml(item.answer)}" placeholder="e.g. 30 Days / 12 Lakhs">
-        </div>
-      `;
-      qaContainer.appendChild(card);
-    });
-
-    // Delete event handlers
-    qaContainer.querySelectorAll('.delete-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const idx = parseInt(e.target.getAttribute('data-index'));
-        currentProfile.screening.splice(idx, 1);
-        renderQaCards(currentProfile.screening);
-      });
-    });
-  }
-
-  // Add new blank Q&A item
-  addQaBtn?.addEventListener('click', () => {
-    if (!currentProfile.screening) currentProfile.screening = [];
-    currentProfile.screening.push({ keywords: '', answer: '' });
-    renderQaCards(currentProfile.screening);
-  });
-
-  resetDefaultsBtn?.addEventListener('click', () => {
-    if (confirm('Are you sure you want to reset profile to defaults (Naukri Profile)?')) {
-      resetToDefaultJson();
-    }
-  });
-
-  // Extract form input data and save to chrome.storage.local
-  saveBtn.addEventListener('click', () => {
-    const qaCards = qaContainer.querySelectorAll('.qa-card');
-    const updatedScreening = [];
-    qaCards.forEach(card => {
-      const kw = card.querySelector('.qa-keywords').value;
-      const ans = card.querySelector('.qa-answer').value;
-      if (kw || ans) {
-        updatedScreening.push({ keywords: kw, answer: ans });
-      }
-    });
-
-    const parsedDelay = parseInt(document.getElementById('stepDelayMs').value, 10);
-    const currSalaryVal = document.getElementById('currentSalary').value.trim();
-
-    // Saved Quick Searches — collect { role, location, experience } objects from blocks
-    const searchBlocks = document.querySelectorAll('#saved-searches-container .search-block');
-    const savedSearches = Array.from(searchBlocks)
-      .map(block => ({
-        role:       block.querySelector('.ss-role')?.value.trim()       || '',
-        location:   block.querySelector('.ss-location')?.value.trim()   || '',
-        experience: block.querySelector('.ss-experience')?.value.trim() || ''
-      }))
-      .filter(s => s.role || s.location || s.experience);
-
-    const updatedProfile = {
-      work: {
-        currentRole: {
-          jobTitle: document.getElementById('currentJobTitle').value.trim(),
-          company: document.getElementById('currentCompany').value.trim(),
-          yearsExperience: document.getElementById('yearsExperience').value.trim(),
-          currentSalary: currSalaryVal,
-          currentSalaryLakhs: currSalaryVal.replace(/[^0-9.]/g, '')
-        }
-      },
-      personal: {
-        fullName: document.getElementById('fullName').value.trim(),
-        firstName: document.getElementById('firstName').value.trim(),
-        lastName: document.getElementById('lastName').value.trim(),
-        email: document.getElementById('email').value.trim(),
-        phone: document.getElementById('phone').value.trim(),
-        city: document.getElementById('city').value.trim(),
-        gender: document.getElementById('gender') ? document.getElementById('gender').value.trim() : 'Male',
-        linkedin: document.getElementById('linkedin').value.trim(),
-        coverLetterInstructions: document.getElementById('coverLetterInstructions').value.trim()
-      },
-      education: {
-        degree: document.getElementById('degree').value.trim(),
-        major: document.getElementById('major').value.trim(),
-        university: document.getElementById('university').value.trim(),
-        graduationYear: document.getElementById('graduationYear').value.trim()
-      },
-      screening: updatedScreening,
-      savedSearches: savedSearches,
-      settings: {
-        autoFillOnLoad: document.getElementById('autoFillOnLoad').checked,
-        pauseOnUnmatchedFields: document.getElementById('pauseOnUnmatchedFields').checked,
-        stepDelayMs: isNaN(parsedDelay) ? 500 : parsedDelay,
-        autoSelectResume: document.getElementById('autoSelectResume').checked,
-        autoAdvanceStep: document.getElementById('autoAdvanceStep').checked,
-        autoSubmitApplication: document.getElementById('autoSubmitApplication').checked,
-        highlightFilledFields: document.getElementById('highlightFilledFields').checked,
-        geminiApiKey: document.getElementById('geminiApiKey').value.trim(),
-        theme: currentProfile.settings?.theme || 'dark',
-        primaryColor: currentProfile.settings?.primaryColor || '#3b82f6'
-      }
-    };
-
-    chrome.storage.local.set({ userProfile: updatedProfile }, () => {
-      currentProfile = updatedProfile;
-      showToast('Naukri Profile Saved Successfully!');
-    });
-  });
-
-  function showToast(msg) {
-    toast.textContent = msg;
-    toast.classList.add('show');
-    setTimeout(() => toast.classList.remove('show'), 2000);
+  function appendSingleLog(logItem) {
+    const cls = logItem.type === 'success' ? 'log-success' :
+                logItem.type === 'warning' ? 'log-warning' :
+                logItem.type === 'error' ? 'log-error' : 'log-info';
+    const div = document.createElement('div');
+    div.className = `log-entry ${cls}`;
+    div.textContent = `[${logItem.timestamp}] ${logItem.message}`;
+    consoleLogs.appendChild(div);
+    consoleLogs.scrollTop = consoleLogs.scrollHeight;
   }
 
   function escapeHtml(str) {
     if (!str) return '';
-    return String(str).replace(/"/g, '&quot;');
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
-  // Load Applied Jobs Logs
-  function loadLogs() {
-    chrome.storage.local.get(['appliedJobs'], (result) => {
-      const logs = result.appliedJobs || [];
-      document.getElementById('total-applications-count').textContent = logs.length;
-      
-      // Calculate Stats
-      let todayCount = 0;
-      let weekCount = 0;
-      let monthCount = 0;
+  // ===========================================================================
+  // START & STOP AUTO-APPLY
+  // ===========================================================================
+  btnStart.addEventListener('click', async () => {
+    btnStart.disabled = true;
+    sessionBadge.textContent = 'Starting...';
 
-      const now = new Date();
-      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const oneDay = 24 * 60 * 60 * 1000;
-      const weekStart = new Date(today.getTime() - (today.getDay() * oneDay)); 
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    // Save rules first
+    await saveRulesFromInputs();
 
-      logs.forEach(log => {
-        if (!log.date) return;
-        const dateStr = log.date.split(',')[0].trim();
-        const parts = dateStr.split('/');
-        if (parts.length === 3) {
-           const logDate = new Date(parseInt(parts[2], 10), parseInt(parts[0], 10) - 1, parseInt(parts[1], 10));
-           if (logDate >= today) todayCount++;
-           if (logDate >= weekStart) weekCount++;
-           if (logDate >= monthStart) monthCount++;
-        }
-      });
+    const currentProfile = (await chrome.storage.local.get(['userProfile'])).userProfile || userProfile;
+    const settings = currentProfile.autoApplierSettings || {};
 
-      const elToday = document.getElementById('stat-today');
-      const elWeek = document.getElementById('stat-week');
-      const elMonth = document.getElementById('stat-month');
-      if(elToday) elToday.textContent = todayCount;
-      if(elWeek) elWeek.textContent = weekCount;
-      if(elMonth) elMonth.textContent = monthCount;
-
-      // Reusable graph renderer
-      function renderGraph(containerId, numDays, wrapperClass = '') {
-        const graphContainer = document.getElementById(containerId);
-        if (!graphContainer) return;
-        graphContainer.innerHTML = '';
-        
-        const daysLabel = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-        const dailyCounts = new Array(numDays).fill(0);
-        
-        for (let i = numDays - 1; i >= 0; i--) {
-          const targetDate = new Date(today.getTime() - (i * oneDay));
-          
-          let count = 0;
-          logs.forEach(log => {
-            if (!log.date) return;
-            const parts = log.date.split(',')[0].trim().split('/');
-            if (parts.length === 3) {
-               const logDate = new Date(parseInt(parts[2], 10), parseInt(parts[0], 10) - 1, parseInt(parts[1], 10));
-               if (logDate.getTime() === targetDate.getTime()) {
-                 count++;
-               }
-            }
-          });
-          
-          let label = daysLabel[targetDate.getDay()];
-          if (numDays > 7 && i !== 0 && targetDate.getDay() !== 1) {
-            label = '';
-          }
-          if (i === 0) label = 'Tdy';
-          
-          dailyCounts[(numDays - 1) - i] = { label, count };
-        }
-        
-        const maxCount = Math.max(...dailyCounts.map(d => d.count), 1);
-        
-        dailyCounts.forEach(day => {
-          const heightPercent = (day.count / maxCount) * 100;
-          const wrapper = document.createElement('div');
-          wrapper.className = `bar-wrapper ${wrapperClass}`;
-          wrapper.innerHTML = `
-            <div class="bar-value">${day.count > 0 ? day.count : ''}</div>
-            <div class="bar" style="height: ${Math.max(heightPercent, 2)}%;"></div>
-            <div class="bar-label">${day.label}</div>
-          `;
-          graphContainer.appendChild(wrapper);
-        });
+    chrome.runtime.sendMessage({ action: 'START_AUTO_APPLY', settings }, (res) => {
+      if (res && res.success) {
+        sessionBadge.textContent = 'Running';
+        sessionBadge.className = 'status-badge status-running';
+        btnStop.disabled = false;
+      } else {
+        sessionBadge.textContent = 'Failed';
+        sessionBadge.className = 'status-badge status-idle';
+        btnStart.disabled = false;
+        alert('Failed to start session: ' + (res?.error || 'Unknown error'));
       }
-
-      renderGraph('weekly-bar-chart', 7);
-      renderGraph('monthly-bar-chart', 30, 'monthly-bar-wrapper');
-
-      const logsContainer = document.getElementById('logs-container');
-      logsContainer.innerHTML = '';
-      
-      if (logs.length === 0) {
-        logsContainer.innerHTML = '<p style="color: var(--text-muted); font-size: 11px; text-align: center; margin-top: 10px;">No Naukri applications tracked yet.</p>';
-        return;
-      }
-
-      logs.slice().reverse().forEach(log => {
-        const item = document.createElement('div');
-        item.className = 'log-item';
-        item.innerHTML = `
-          <div class="log-item-header">
-            <span class="log-item-title" title="${escapeHtml(log.title)}">${escapeHtml(log.title)}</span>
-            <span class="log-item-date">${escapeHtml(log.date)}</span>
-          </div>
-          <div class="log-item-company">${escapeHtml(log.company)}</div>
-        `;
-        if (log.url) {
-          item.style.cursor = 'pointer';
-          item.addEventListener('click', () => chrome.tabs.create({ url: log.url }));
-        }
-        logsContainer.appendChild(item);
-      });
-    });
-  }
-
-  // Export CSV
-  document.getElementById('export-csv-btn')?.addEventListener('click', () => {
-    chrome.storage.local.get(['appliedJobs'], (result) => {
-      const logs = result.appliedJobs || [];
-      if (logs.length === 0) {
-        showToast('No applications to export!');
-        return;
-      }
-
-      let csvContent = "data:text/csv;charset=utf-8,";
-      csvContent += "Date Applied,Company Name,Job Title,Job Link\r\n";
-
-      logs.forEach(log => {
-        const date = `"${log.date || ''}"`;
-        const company = `"${(log.company || '').replace(/"/g, '""')}"`;
-        const title = `"${(log.title || '').replace(/"/g, '""')}"`;
-        const url = `"${log.url || ''}"`;
-        csvContent += `${date},${company},${title},${url}\r\n`;
-      });
-
-      const encodedUri = encodeURI(csvContent);
-      const link = document.createElement("a");
-      link.setAttribute("href", encodedUri);
-      link.setAttribute("download", `Naukri_SpeedFill_Applications_${new Date().toISOString().split('T')[0]}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
     });
   });
 
-  loadProfileData();
-  loadLogs();
+  btnStop.addEventListener('click', () => {
+    btnStop.disabled = true;
+    sessionBadge.textContent = 'Stopping...';
+    chrome.runtime.sendMessage({ action: 'STOP_AUTO_APPLY' }, () => {
+      sessionBadge.textContent = 'Ready';
+      sessionBadge.className = 'status-badge status-idle';
+      btnStart.disabled = false;
+      btnResume.style.display = 'none';
+    });
+  });
+
+  btnResume.addEventListener('click', () => {
+    btnResume.disabled = true;
+    sessionBadge.textContent = 'Resuming...';
+    chrome.runtime.sendMessage({
+      action: 'FORWARD_TO_ACTIVE_TAB',
+      message: { action: 'RESUME_AUTO_APPLY' }
+    }, () => {
+      btnResume.style.display = 'none';
+      btnResume.disabled = false;
+      sessionBadge.textContent = 'Running';
+      sessionBadge.className = 'status-badge status-running';
+    });
+  });
+
+  btnClearLogs.addEventListener('click', () => {
+    chrome.storage.local.set({ sessionLogs: [] }, () => {
+      consoleLogs.innerHTML = '<div class="log-entry log-info">[System] Logs cleared.</div>';
+    });
+  });
+
+  // ===========================================================================
+  // SAVE RULES & PROFILE
+  // ===========================================================================
+  async function saveRulesFromInputs() {
+    const data = await chrome.storage.local.get(['userProfile']);
+    const prof = data.userProfile || userProfile || {};
+    prof.autoApplierSettings = prof.autoApplierSettings || {};
+
+    prof.autoApplierSettings.targetJobQuery = ruleQuery.value.trim();
+    prof.autoApplierSettings.targetLocation = ruleLocation.value.trim();
+    prof.autoApplierSettings.jobFreshness = ruleFreshness.value;
+    prof.autoApplierSettings.userYearsExp = parseInt(ruleExp.value, 10) || 0;
+    prof.autoApplierSettings.minMonthlySalary = parseInt(ruleSalary.value, 10) || 0;
+    prof.autoApplierSettings.unlistedExpAction = ruleUnlistedExp.value;
+    prof.autoApplierSettings.blacklistKeywords = ruleBlacklist.value.trim();
+    prof.autoApplierSettings.blockedCompanies = ruleCompanyBlacklist.value.trim();
+    prof.autoApplierSettings.strictLocation = ruleStrictLocation.checked;
+    prof.autoApplierSettings.saveContactJobs = ruleSaveContact.checked;
+    prof.autoApplierSettings.blockAiSpam = ruleBlockSpam.checked;
+    prof.autoApplierSettings.matchTitleRelevance = ruleTitleRelevance.checked;
+    prof.autoApplierSettings.stepDelayMs = parseInt(ruleDelay.value, 10) || 1200;
+    prof.autoApplierSettings.maxJobsPerSession = parseInt(ruleMaxJobs.value, 10) || 25;
+
+    prof.work = prof.work || {};
+    prof.work.targetRole = prof.work.targetRole || {};
+    prof.work.targetRole.targetResumeName = ruleTargetResume.value.trim();
+
+    await chrome.storage.local.set({ userProfile: prof });
+    userProfile = prof;
+  }
+
+  btnSaveRules.addEventListener('click', async () => {
+    await saveRulesFromInputs();
+    btnSaveRules.textContent = '✅ Saved!';
+    setTimeout(() => { btnSaveRules.textContent = '💾 Save Filter Rules'; }, 1500);
+  });
+
+  btnSaveProfile.addEventListener('click', async () => {
+    const data = await chrome.storage.local.get(['userProfile']);
+    const prof = data.userProfile || userProfile || {};
+
+    prof.personal = prof.personal || {};
+    prof.personal.fullName = profFullName.value.trim();
+    prof.personal.phone = profPhone.value.trim();
+    prof.personal.email = profEmail.value.trim();
+    prof.personal.city = profCity.value.trim();
+
+    prof.work = prof.work || {};
+    prof.work.currentRole = prof.work.currentRole || {};
+    prof.work.currentRole.jobTitle = profCurrTitle.value.trim();
+    prof.work.currentRole.company = profCurrCompany.value.trim();
+    prof.work.currentRole.yearsExperience = parseInt(profYearsExp.value, 10) || 1;
+    prof.work.currentRole.currentSalary = profCurrCtc.value.trim();
+
+    prof.work.targetRole = prof.work.targetRole || {};
+    prof.work.targetRole.noticePeriod = profNotice.value.trim();
+    prof.work.targetRole.expectedSalary = profExpectedCtc.value.trim();
+
+    await chrome.storage.local.set({ userProfile: prof });
+    userProfile = prof;
+    btnSaveProfile.textContent = '✅ Saved!';
+    setTimeout(() => { btnSaveProfile.textContent = '💾 Save Profile Details'; }, 1500);
+  });
+
+  // ===========================================================================
+  // SCREENING Q&A BANK CRUD
+  // ===========================================================================
+  function renderQAList() {
+    const screening = userProfile?.screening || [];
+    if (screening.length === 0) {
+      qaListContainer.innerHTML = '<div class="empty-state">No screening questions saved yet.</div>';
+      return;
+    }
+
+    qaListContainer.innerHTML = screening.map((item, idx) => `
+      <div class="qa-item">
+        <div>
+          <div class="qa-keys">${escapeHtml(item.keywords)}</div>
+          <div class="qa-ans">➔ ${escapeHtml(item.answer)}</div>
+        </div>
+        <div class="qa-actions">
+          <button class="btn btn-small btn-secondary btn-edit-qa" data-idx="${idx}">✏️</button>
+          <button class="btn btn-small btn-danger btn-del-qa" data-idx="${idx}">🗑️</button>
+        </div>
+      </div>
+    `).join('');
+
+    qaListContainer.querySelectorAll('.btn-edit-qa').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const idx = parseInt(e.currentTarget.dataset.idx, 10);
+        openEditQa(idx);
+      });
+    });
+
+    qaListContainer.querySelectorAll('.btn-del-qa').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const idx = parseInt(e.currentTarget.dataset.idx, 10);
+        userProfile.screening.splice(idx, 1);
+        await chrome.storage.local.set({ userProfile });
+        renderQAList();
+      });
+    });
+  }
+
+  btnOpenAddQa.addEventListener('click', () => {
+    qaFormContainer.style.display = 'block';
+    qaFormTitle.textContent = 'Add Screening Rule';
+    qaEditIndex.value = '-1';
+    qaInputKeywords.value = '';
+    qaInputAnswer.value = '';
+    qaInputKeywords.focus();
+  });
+
+  function openEditQa(idx) {
+    const item = userProfile?.screening[idx];
+    if (!item) return;
+    qaFormContainer.style.display = 'block';
+    qaFormTitle.textContent = 'Edit Screening Rule';
+    qaEditIndex.value = String(idx);
+    qaInputKeywords.value = item.keywords || '';
+    qaInputAnswer.value = item.answer || '';
+    qaInputKeywords.focus();
+  }
+
+  btnCancelQa.addEventListener('click', () => {
+    qaFormContainer.style.display = 'none';
+  });
+
+  btnSaveQa.addEventListener('click', async () => {
+    const keys = qaInputKeywords.value.trim();
+    const ans = qaInputAnswer.value.trim();
+    if (!keys || !ans) {
+      alert('Please enter both question keywords and an answer.');
+      return;
+    }
+
+    userProfile.screening = userProfile.screening || [];
+    const editIdx = parseInt(qaEditIndex.value, 10);
+
+    if (editIdx >= 0 && editIdx < userProfile.screening.length) {
+      userProfile.screening[editIdx] = { keywords: keys, answer: ans };
+    } else {
+      userProfile.screening.push({ keywords: keys, answer: ans });
+    }
+
+    await chrome.storage.local.set({ userProfile });
+    qaFormContainer.style.display = 'none';
+    renderQAList();
+  });
+
+  // ===========================================================================
+  // SAVED & APPLIED JOBS (WITH RECRUITER CONTACT BADGES & LINKS)
+  // ===========================================================================
+  viewSavedBtn.addEventListener('click', () => {
+    viewSavedBtn.classList.add('active');
+    viewAppliedBtn.classList.remove('active');
+    savedSubview.classList.add('active');
+    appliedSubview.classList.remove('active');
+    renderJobs();
+  });
+
+  viewAppliedBtn.addEventListener('click', () => {
+    viewAppliedBtn.classList.add('active');
+    viewSavedBtn.classList.remove('active');
+    appliedSubview.classList.add('active');
+    savedSubview.classList.remove('active');
+    renderJobs();
+  });
+
+  filterContactOnlyBtn.addEventListener('click', () => {
+    filterContactOnly = !filterContactOnly;
+    filterContactOnlyBtn.classList.toggle('active', filterContactOnly);
+    renderJobs();
+  });
+
+  savedSearchInput.addEventListener('input', () => renderJobs());
+  appliedSearchInput.addEventListener('input', () => renderJobs());
+
+  async function renderJobs() {
+    const data = await chrome.storage.local.get(['savedJobs', 'appliedJobs']);
+    let saved = data.savedJobs || [];
+    let applied = data.appliedJobs || [];
+
+    savedTabCount.textContent = saved.length;
+    savedCountBadge.textContent = saved.length;
+    appliedTabCount.textContent = applied.length;
+
+    // Filter Saved Jobs
+    const savedQuery = (savedSearchInput.value || '').toLowerCase().trim();
+    let filteredSaved = saved.filter(j => {
+      const matchText = `${j.title} ${j.company} ${j.location} ${j.reason || ''} ${j.contactInfo?.summary || ''}`.toLowerCase();
+      const textMatches = !savedQuery || matchText.includes(savedQuery);
+      const contactMatches = !filterContactOnly || Boolean(j.contactInfo?.hasContact);
+      return textMatches && contactMatches;
+    });
+
+    if (filteredSaved.length === 0) {
+      savedJobsContainer.innerHTML = '<div class="empty-state">No matching saved jobs found.</div>';
+    } else {
+      savedJobsContainer.innerHTML = filteredSaved.map((j, idx) => renderJobCard(j, idx, 'saved')).join('');
+    }
+
+    // Filter Applied Jobs
+    const appliedQuery = (appliedSearchInput.value || '').toLowerCase().trim();
+    let filteredApplied = applied.filter(j => {
+      const matchText = `${j.title} ${j.company} ${j.location}`.toLowerCase();
+      return !appliedQuery || matchText.includes(appliedQuery);
+    });
+
+    if (filteredApplied.length === 0) {
+      appliedJobsContainer.innerHTML = '<div class="empty-state">No matching applied jobs found.</div>';
+    } else {
+      appliedJobsContainer.innerHTML = filteredApplied.map((j, idx) => renderJobCard(j, idx, 'applied')).join('');
+    }
+
+    // Attach individual delete handlers
+    document.querySelectorAll('.btn-del-job').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const type = e.currentTarget.dataset.type;
+        const index = parseInt(e.currentTarget.dataset.idx, 10);
+        if (type === 'saved') {
+          saved.splice(index, 1);
+          await chrome.storage.local.set({ savedJobs: saved });
+        } else {
+          applied.splice(index, 1);
+          await chrome.storage.local.set({ appliedJobs: applied });
+        }
+        renderJobs();
+      });
+    });
+  }
+
+  function renderJobCard(job, idx, type) {
+    const isSaved = type === 'saved';
+    const reasonBadge = job.reason
+      ? `<span class="job-badge ${job.reason.includes('Incomplete') ? 'badge-incomplete' : 'badge-reason'}">${escapeHtml(job.reason)}</span>`
+      : '';
+
+    // Contact Box
+    let contactHtml = '';
+    if (job.contactInfo && job.contactInfo.hasContact) {
+      const phoneBtn = job.contactInfo.primaryPhone
+        ? `<a href="tel:${job.contactInfo.primaryPhone}" class="contact-btn" title="Click to call recruiter">📞 +91 ${escapeHtml(job.contactInfo.primaryPhone)}</a>`
+        : '';
+      const emailBtn = job.contactInfo.primaryEmail
+        ? `<a href="mailto:${job.contactInfo.primaryEmail}" class="contact-btn" title="Click to email recruiter">✉️ ${escapeHtml(job.contactInfo.primaryEmail)}</a>`
+        : '';
+      const gmailTag = job.contactInfo.isGmail ? '<span class="gmail-tag">Gmail</span>' : '';
+
+      contactHtml = `
+        <div class="contact-box">
+          <span class="contact-info-text">
+            <span>📞 Recruiter Contact:</span>
+            ${gmailTag}
+          </span>
+          <div class="contact-actions">
+            ${phoneBtn}
+            ${emailBtn}
+          </div>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="job-card-item">
+        <div class="job-card-header">
+          <a href="${escapeHtml(job.url || '#')}" target="_blank" class="job-card-title">${escapeHtml(job.title || 'Untitled Role')}</a>
+          <button class="btn-del-job text-btn" data-type="${type}" data-idx="${idx}" title="Delete listing">🗑️</button>
+        </div>
+        <div class="job-card-company">${escapeHtml(job.company || 'Company')}</div>
+        <div class="job-card-meta">
+          <span>📍 ${escapeHtml(job.location || 'India')}</span>
+          ${job.salary ? `<span>💰 ${escapeHtml(job.salary)}</span>` : ''}
+          <span>🕒 ${escapeHtml(job.savedAt || job.appliedAt || '')}</span>
+          ${reasonBadge}
+        </div>
+        ${contactHtml}
+      </div>
+    `;
+  }
+
+  // Export CSV
+  btnExportSaved.addEventListener('click', async () => {
+    const data = await chrome.storage.local.get(['savedJobs']);
+    exportJobsToCSV(data.savedJobs || [], 'naukri_saved_jobs.csv');
+  });
+
+  btnExportApplied.addEventListener('click', async () => {
+    const data = await chrome.storage.local.get(['appliedJobs']);
+    exportJobsToCSV(data.appliedJobs || [], 'naukri_applied_jobs.csv');
+  });
+
+  btnClearSaved.addEventListener('click', async () => {
+    if (confirm('Clear all saved jobs?')) {
+      await chrome.storage.local.set({ savedJobs: [] });
+      renderJobs();
+    }
+  });
+
+  btnClearApplied.addEventListener('click', async () => {
+    if (confirm('Clear all applied jobs records?')) {
+      await chrome.storage.local.set({ appliedJobs: [] });
+      renderJobs();
+    }
+  });
+
+  function exportJobsToCSV(jobs, filename) {
+    if (!jobs || jobs.length === 0) {
+      alert('No jobs to export.');
+      return;
+    }
+
+    const headers = ['Title', 'Company', 'Location', 'Salary', 'Date', 'URL', 'Reason', 'Recruiter Phone', 'Recruiter Email'];
+    const rows = jobs.map(j => [
+      `"${(j.title || '').replace(/"/g, '""')}"`,
+      `"${(j.company || '').replace(/"/g, '""')}"`,
+      `"${(j.location || '').replace(/"/g, '""')}"`,
+      `"${(j.salary || '').replace(/"/g, '""')}"`,
+      `"${(j.appliedAt || j.savedAt || '').replace(/"/g, '""')}"`,
+      `"${(j.url || '').replace(/"/g, '""')}"`,
+      `"${(j.reason || '').replace(/"/g, '""')}"`,
+      `"${(j.contactInfo?.primaryPhone ? '+91 ' + j.contactInfo.primaryPhone : '').replace(/"/g, '""')}"`,
+      `"${(j.contactInfo?.primaryEmail || '').replace(/"/g, '""')}"`
+    ]);
+
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ===========================================================================
+  // ANALYTICS & SCROLLABLE DROPOFF BREAKDOWN
+  // ===========================================================================
+  const DROPOFF_CATEGORIES = [
+    { key: 'experience', label: '🎓 Experience Exceeded', class: 'fill-exp' },
+    { key: 'salary', label: '💰 Salary Floor Unmet', class: 'fill-salary' },
+    { key: 'blacklist', label: '🚫 Blacklist Keyword', class: 'fill-blacklist' },
+    { key: 'location', label: '📍 Outside Target City', class: 'fill-loc' },
+    { key: 'company', label: '🏢 Blocked Company', class: 'fill-company' },
+    { key: 'ai_spam', label: '🛡️ AI Gig / Annotation Spam', class: 'fill-spam' },
+    { key: 'title_relevance', label: '🎯 Title Relevance Filter', class: 'fill-relevance' },
+    { key: 'freshness', label: '📅 Stale / Post Age Exceeded', class: 'fill-other' },
+    { key: 'already_applied', label: '📋 Already Applied', class: 'fill-other' },
+    { key: 'easy_apply', label: '⚡ External Site', class: 'fill-easy' },
+    { key: 'unrecognized', label: '❓ Unrecognized / Expired', class: 'fill-other' }
+  ];
+
+  periodBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      periodBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentLogsPeriod = btn.dataset.period;
+      renderAnalytics(currentLogsPeriod);
+    });
+  });
+
+  async function renderAnalytics(period = 'daily') {
+    const data = await chrome.storage.local.get(['autoApplySession', 'analyticsHistory']);
+    const history = data.analyticsHistory || {};
+    const session = data.autoApplySession || {};
+
+    let totalScanned = 0;
+    let totalApplied = 0;
+    let totalSaved = 0;
+    let totalSkipped = 0;
+    let totalSessions = 0;
+    let skipReasons = {};
+
+    const today = new Date();
+    const isMatchDate = (dateKey) => {
+      if (period === 'all') return true;
+      const targetDate = new Date(dateKey);
+      if (isNaN(targetDate.getTime())) return false;
+
+      const diffDays = Math.floor((today - targetDate) / (1000 * 60 * 60 * 24));
+      if (period === 'daily') return diffDays === 0;
+      if (period === 'weekly') return diffDays <= 7;
+      if (period === 'monthly') return diffDays <= 30;
+      return true;
+    };
+
+    Object.keys(history).forEach(dateKey => {
+      if (isMatchDate(dateKey)) {
+        const rec = history[dateKey];
+        totalScanned += rec.scanned || 0;
+        totalApplied += rec.applied || 0;
+        totalSaved += rec.saved || 0;
+        totalSkipped += rec.skipped || 0;
+        totalSessions += rec.sessions || 1;
+
+        if (rec.skipReasons) {
+          Object.keys(rec.skipReasons).forEach(k => {
+            skipReasons[k] = (skipReasons[k] || 0) + rec.skipReasons[k];
+          });
+        }
+      }
+    });
+
+    // If today is empty, fall back to current session
+    if (totalScanned === 0 && session.stats) {
+      totalScanned = session.stats.scanned || 0;
+      totalApplied = session.stats.applied || 0;
+      totalSaved = session.stats.saved || 0;
+      totalSkipped = session.stats.skipped || 0;
+      totalSessions = 1;
+      skipReasons = session.skipReasons || {};
+    }
+
+    // Strict accounting check
+    totalScanned = totalApplied + totalSaved + totalSkipped;
+
+    logsPeriodLabel.textContent = period === 'daily' ? "Today's Summary" :
+                                 period === 'weekly' ? 'Last 7 Days' :
+                                 period === 'monthly' ? 'Last 30 Days' : 'All-Time Totals';
+    logsSessionsCount.textContent = `${totalSessions} Session${totalSessions === 1 ? '' : 's'}`;
+
+    logsMetricScanned.textContent = totalScanned;
+    logsMetricApplied.textContent = totalApplied;
+    logsMetricSaved.textContent = totalSaved;
+    logsMetricSkipped.textContent = totalSkipped;
+
+    const convPct = totalScanned > 0 ? Math.round((totalApplied / totalScanned) * 100) : 0;
+    logsProgressText.textContent = `${convPct}%`;
+    logsProgressBarFill.style.width = `${convPct}%`;
+
+    // Render Dropoff Bars
+    if (totalSkipped === 0) {
+      logsBreakdownContainer.innerHTML = '<div class="empty-state" style="padding: 12px 0;">No jobs skipped yet in this timeframe.</div>';
+    } else {
+      logsBreakdownContainer.innerHTML = DROPOFF_CATEGORIES.map(cat => {
+        const count = skipReasons[cat.key] || 0;
+        if (count === 0) return '';
+        const pct = Math.round((count / totalSkipped) * 100);
+        return `
+          <div class="dropoff-item">
+            <div class="dropoff-row-header">
+              <span>${cat.label}</span>
+              <span>${count} (${pct}%)</span>
+            </div>
+            <div class="dropoff-bar-bg">
+              <div class="dropoff-bar-fill ${cat.class}" style="width: ${pct}%;"></div>
+            </div>
+          </div>
+        `;
+      }).filter(Boolean).join('');
+    }
+  }
+
+  btnExportLogs.addEventListener('click', async () => {
+    const data = await chrome.storage.local.get(['analyticsHistory']);
+    const history = data.analyticsHistory || {};
+    const rows = Object.values(history).map(h => [
+      h.date, h.scanned, h.applied, h.saved, h.skipped, h.sessions || 1
+    ]);
+    const headers = ['Date', 'Scanned', 'Applied', 'Saved', 'Skipped', 'Sessions'];
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'naukri_analytics.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  btnClearHistory.addEventListener('click', async () => {
+    if (confirm('Clear all historical analytics?')) {
+      chrome.runtime.sendMessage({ action: 'CLEAR_ANALYTICS_HISTORY' }, () => {
+        renderAnalytics(currentLogsPeriod);
+      });
+    }
+  });
+
+  // ===========================================================================
+  // REAL-TIME RUNTIME MESSAGE LISTENER
+  // ===========================================================================
+  chrome.runtime.onMessage.addListener((request) => {
+    if (request.action === 'STATS_UPDATED') {
+      const stats = request.stats;
+      metricScanned.textContent = stats.scanned || 0;
+      metricApplied.textContent = stats.applied || 0;
+      metricSaved.textContent = stats.saved || 0;
+      metricSkipped.textContent = stats.skipped || 0;
+
+      const maxJobs = parseInt(ruleMaxJobs.value, 10) || 25;
+      progressText.textContent = `${stats.applied || 0} / ${maxJobs} Jobs`;
+      const pct = Math.min(100, Math.round(((stats.applied || 0) / maxJobs) * 100));
+      progressBarFill.style.width = `${pct}%`;
+
+      renderJobs();
+    }
+
+    if (request.action === 'NEW_LOG') {
+      appendSingleLog(request.log);
+    }
+
+    if (request.action === 'SESSION_STOPPED' || request.action === 'SESSION_COMPLETED') {
+      sessionBadge.textContent = request.action === 'SESSION_COMPLETED' ? 'Completed' : 'Ready';
+      sessionBadge.className = 'status-badge status-idle';
+      btnStart.disabled = false;
+      btnStop.disabled = true;
+      btnResume.style.display = 'none';
+    }
+
+    if (request.action === 'NOTIFY_CAPTCHA') {
+      sessionBadge.textContent = 'Verification';
+      sessionBadge.className = 'status-badge status-paused';
+      btnResume.style.display = 'inline-flex';
+    }
+
+    if (request.action === 'ANALYTICS_UPDATED') {
+      renderAnalytics(currentLogsPeriod);
+    }
+  });
+
+  // Theme Toggle
+  themeToggleBtn.addEventListener('click', () => {
+    const isLight = document.body.getAttribute('data-theme') === 'light';
+    if (isLight) {
+      document.body.removeAttribute('data-theme');
+      themeToggleBtn.textContent = '🌙';
+      chrome.storage.local.set({ theme: 'dark' });
+    } else {
+      document.body.setAttribute('data-theme', 'light');
+      themeToggleBtn.textContent = '☀️';
+      chrome.storage.local.set({ theme: 'light' });
+    }
+  });
+
+  await loadInitialData();
 });
