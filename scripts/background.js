@@ -183,7 +183,9 @@ function buildNaukriSearchUrl(query, location, experience, freshness) {
 
   // Freshness (Job Age): '1' (24h), '3', '7', '15', '30' or 'all'
   const cleanFreshness = freshness !== undefined && freshness !== null ? String(freshness).trim() : '1';
-  
+  if (cleanFreshness && cleanFreshness !== 'all' && cleanFreshness !== '0') {
+    params.set('jobAge', cleanFreshness);
+  }
 
   if (experience !== undefined && experience !== null && experience !== '') {
     params.set('experience', String(experience));

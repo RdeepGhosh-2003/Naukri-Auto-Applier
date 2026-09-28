@@ -721,6 +721,39 @@
   // ===========================================================================
   // IN-PAGE FILTER SYNCHRONIZATION (DOM-LEVEL RESILIENCE)
   // ===========================================================================
+  async function syncPageFilters(settings) {
+    if (!settings) return;
+
+    // 1. Freshness Filter Sync (e.g., '1', '3', '7', '15', '30')
+    if (settings.jobFreshness && settings.jobFreshness !== 'all') {
+      try {
+        const freshnessBtn = document.getElementById('filter-freshness');
+        if (freshnessBtn) {
+          const btnText = (freshnessBtn.textContent || '').trim().toLowerCase();
+          const targetDays = String(settings.jobFreshness).trim();
+          const expectedLabel = targetDays === '1' ? '1 day' : `${targetDays} days`;
+
+          if (!btnText.includes(expectedLabel)) {
+            log(`🔄 Synchronizing Freshness filter in UI to Last ${targetDays} day(s)...`, 'info');
+            freshnessBtn.click();
+            await sleep(250);
+
+            const opt = document.querySelector(`a[data-id="filter-freshness-${targetDays}"]`);
+            if (opt) {
+              opt.click();
+              await sleep(2500); // Allow React to re-fetch and render filtered listings
+              log(`✅ Freshness filter applied in UI: Last ${targetDays} day(s).`, 'success');
+            } else {
+              freshnessBtn.click(); // Close dropdown if option not matched
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[Applier] Freshness sync error:', err);
+      }
+    }
+  }
+
   // ===========================================================================
   // MAIN CRAWLER LOOP
   // ===========================================================================
@@ -744,7 +777,7 @@
     const maxJobs = settings.maxJobsPerSession || 25;
 
     // Proactively synchronize in-page UI filters with session settings
-    // filters sync
+    await syncPageFilters(settings);
 
     log(`🚀 Naukri Auto-Apply Crawler active on page! Target: up to ${maxJobs} jobs.`, 'info');
 
