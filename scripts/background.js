@@ -419,7 +419,115 @@ async function handleJobApplied(job) {
 // ============================================================================
 // 4B. DETAIL PAGE APPLICATION IN CHILD TAB (FULL-PAGE LISTING ORCHESTRATION)
 // ============================================================================
+async function handleApplyJobInTab(job, senderTabId) {
+  return new Promise(async (resolve) => {
+    try {
+      let targetUrl = job.url || '';
+      if (!targetUrl.startsWith('http')) {
+        targetUrl = `https://www.naukri.com${targetUrl.startsWith('/') ? '' : '/'}${targetUrl}`;
+      }
 
+      // Append #autoApply=true to URL hash
+      if (targetUrl.includes('#')) {
+        targetUrl = targetUrl.replace(/#.*$/, '#autoApply=true');
+      } else {
+        targetUrl = `${targetUrl}#autoApply=true`;
+      }
+
+      await appendSessionLog(`🌐 Opening listing in detail tab: "${job.title}" at "${job.company}" to click Apply...`, 'info');
+
+      // Create child tab in background (active: false prevents interrupting user's focus)
+      const childTab = await chrome.tabs.create({ url: targetUrl, active: false });
+
+      // Generous 45-second timeout in case page hangs or has slow network
+      const timeoutId = setTimeout(async () => {
+        if (pendingDetailApplies.has(childTab.id)) {
+          pendingDetailApplies.delete(childTab.id);
+          try { await chrome.tabs.remove(childTab.id); } catch (_) {}
+          await appendSessionLog(`⚠️ Timeout waiting for application on "${job.title}". Saving to Saved Jobs.`, 'warning');
+          await handleSaveJob({
+            ...job,
+            reason: 'Application Timeout (Manual Review Required)'
+          });
+          resolve({ status: 'saved', reason: 'timeout' });
+        }
+      }, 45000);
+
+      pendingDetailApplies.set(childTab.id, {
+        resolve,
+        timeoutId,
+        job,
+        sourceTabId: senderTabId,
+        startedAt: Date.now()
+      });
+    } catch (err) {
+      console.error('[Background] Failed to launch detail apply tab:', err);
+      await handleSaveJob({ ...job, reason: 'Failed to open detail tab' });
+      resolve({ status: 'saved', reason: err.message });
+    }
+  });
+}
+
+async function handleDetailApplyFinished(childTabId, request) {
+  const entry = pendingDetailApplies.get(childTabId);
+  if (entry) {
+    clearTimeout(entry.timeoutId);
+    pendingDetailApplies.delete(childTabId);
+
+    // ONLY stop and keep tab open for the 'Apply' button when questions remain unanswered!
+    // NEVER stop or keep tab open for 'Apply on company site' (company_site), already_applied, or other listings!
+    const shouldKeepTabOpen = Boolean(
+      request.keepTabOpen &&
+      request.status !== 'company_site' &&
+      request.status !== 'applied' &&
+      request.status !== 'skipped'
+    );
+
+    if (shouldKeepTabOpen) {
+      // KEEP TAB OPEN! Bring it to the active front so user can fill the answers
+      try {
+        await chrome.tabs.update(childTabId, { active: true });
+      } catch (_) {}
+
+      await appendSessionLog(
+        `✍️ Stopped auto-apply for "${entry.job.title}" at "${entry.job.company}". Leaving tab open for you to fill unanswered questions.`,
+        'warning'
+      );
+
+      // Halt the engine on the search tab so it stops opening more tabs while user fills this one
+      if (entry.sourceTabId) {
+        try {
+          chrome.tabs.sendMessage(entry.sourceTabId, { action: 'HALT_ENGINE' }).catch(() => {});
+        } catch (_) {}
+      }
+
+      // Mark session as paused if running
+      try {
+        const data = await chrome.storage.local.get(['autoApplySession']);
+        if (data.autoApplySession && data.autoApplySession.isRunning) {
+          data.autoApplySession.isPaused = true;
+          await chrome.storage.local.set({ autoApplySession: data.autoApplySession });
+        }
+      } catch (_) {}
+    } else {
+      // Close child tab cleanly for company_site, applied, skipped, etc.
+      try {
+        await chrome.tabs.remove(childTabId);
+      } catch (_) {}
+
+      // Ensure search tab stays active if it was open
+      if (entry.sourceTabId) {
+        try {
+          await chrome.tabs.update(entry.sourceTabId, { active: true });
+        } catch (_) {}
+      }
+    }
+
+    entry.resolve({ status: request.status, reason: request.reason });
+    return { success: true };
+  }
+  return { success: false, error: 'No pending detail apply found for tab' };
+}
 
 // ============================================================================
 // 5. RUNTIME MESSAGE DISPATCHER

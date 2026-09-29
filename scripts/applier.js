@@ -90,11 +90,10 @@
     if (!pill) {
       pill = document.createElement('div');
       pill.id = 'naukri-auto-applier-pill';
-      pill.style.cssText = 'position: fixed; bottom: 24px; left: 24px; z-index: 2147483647; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; pointer-events: auto;';
+      pill.style.cssText = 'position: fixed; bottom: 24px; right: 24px; z-index: 2147483647; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; pointer-events: auto;';
       document.body.appendChild(pill);
     } else {
-      pill.style.left = '24px';
-      pill.style.right = 'auto';
+      pill.style.right = '24px'; pill.style.left = 'auto';
     }
 
     const dotColors = {
