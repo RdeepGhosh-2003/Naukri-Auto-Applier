@@ -90,10 +90,11 @@
     if (!pill) {
       pill = document.createElement('div');
       pill.id = 'naukri-auto-applier-pill';
-      pill.style.cssText = 'position: fixed; bottom: 24px; right: 24px; z-index: 2147483647; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; pointer-events: auto;';
+      pill.style.cssText = 'position: fixed; bottom: 24px; left: 24px; z-index: 2147483647; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; pointer-events: auto;';
       document.body.appendChild(pill);
     } else {
-      pill.style.right = '24px'; pill.style.left = 'auto';
+      pill.style.left = '24px';
+      pill.style.right = 'auto';
     }
 
     const dotColors = {
@@ -1225,59 +1226,183 @@
   }
 
   // Standalone Job Details Page: Evaluate Filters & Autonomously Apply
-  // Standalone page check: evaluate filters and autonomously apply on matching listings
-    // Dedicated handler for Naukri's saveApply error / confirmation landing page
-  function handleSaveApplyPage() {
-    const pageText = (document.body?.innerText || '').toLowerCase();
-    const isRejected = pageText.includes('your application was not accepted') ||
-                       pageText.includes('application was not accepted') ||
-                       pageText.includes('due to incomplete information') ||
-                       pageText.includes('please answer all mandatory questions');
+  async function initializeDetailPageHandler() {
+    let attempts = 0;
+    while (attempts < 15) {
+      if (document.querySelector('h1') || document.querySelector('.styles_job-header-container___0wLZ, [class*="jd-header"]')) {
+        break;
+      }
+      await sleep(200);
+      attempts++;
+    }
 
-    if (isRejected) {
-      log('⚠️ Application not accepted by Naukri due to incomplete mandatory questions or profile details.', 'warning');
-      playAudioChime();
+    const data = await chrome.storage.local.get(['userProfile', 'autoApplySession', 'appliedJobs']);
+    const profile = data.userProfile || {};
+    const settings = data.autoApplySession?.settings || profile.autoApplierSettings || {};
+    const appliedJobs = data.appliedJobs || [];
 
-      updateFloatingPill('⚠️ Application Incomplete: Mandatory Questions or Profile Details Required', {
-        isDone: true,
-        status: 'warning',
-        showStop: false,
-        actionButton: {
-          text: '↩️ Return to Job',
-          bg: '#f59e0b',
-          onClick: () => {
-            if (window.history.length > 1) {
-              window.history.back();
-            }
-          }
-        }
-      });
+    const isSessionRunning = Boolean(data.autoApplySession && data.autoApplySession.isRunning);
+    const hasAutoApplyHash = window.location.hash.includes('autoApply=true');
 
+    // Extract Job Info
+    const title = (document.querySelector('h1')?.textContent || document.title || 'Job').trim();
+    const compEl = document.querySelector(
+      '[class*="jd-header-comp-name"] a, [class*="hiring-for"], a.comp-name, .comp-name, [class*="company-name"], [class*="companyName"]'
+    );
+    let company = (compEl?.textContent || '').trim();
+    if (!company || company.toLowerCase() === 'company') {
+      const headerComp = document.querySelector('#job_header a[title], .styles_job-header-container___0wLZ a[title]');
+      if (headerComp) company = (headerComp.getAttribute('title') || headerComp.textContent || '').trim();
+    }
+    if (!company) company = 'Company';
+
+    const headerContainer = document.querySelector('.styles_job-header-container___0wLZ, [class*="job-header"], [class*="jd-header"]');
+    const headerText = headerContainer ? headerContainer.innerText : '';
+
+    const expEl = document.querySelector('.styles_jhc__exp__k_giM, [class*="exp-container"], [class*="experience"], [class*="exp"]');
+    let expText = (expEl?.textContent || '').trim();
+    if (!expText) {
+      const expMatch = headerText.match(/(\d+\s*-\s*\d+\s*(?:years|yrs)|\d+\+?\s*(?:years|yrs))/i);
+      if (expMatch) expText = expMatch[1];
+    }
+
+    const salEl = document.querySelector('.styles_jhc__salary__jdfEC, [class*="salary-container"], [class*="salary"]');
+    let salaryText = (salEl?.textContent || '').trim();
+    if (!salaryText) {
+      const salMatch = headerText.match(/(\d+.*(?:Lacs|LPA|PA|Per Annum))/i);
+      if (salMatch) salaryText = salMatch[1];
+    }
+
+    const locEl = document.querySelector('.styles_jhc__loc___Du2H, .styles_jhc__location__W_pVs, [class*="location-container"], [class*="location"], [class*="loc"]');
+    let location = (locEl?.textContent || '').trim();
+    if (!location) {
+      const locAnchor = headerContainer?.querySelector('a[href*="jobs-in-"]');
+      if (locAnchor) location = locAnchor.textContent.trim();
+    }
+
+    const postedEl = document.querySelector('.styles_jhc__jd-stats__KrId0, .styles_jhc__stat__vY6jL, [class*="stat"], [class*="posted"]');
+    const postedText = (postedEl?.textContent || headerText).trim();
+
+    const descEl = document.querySelector('.styles_JDC__dang-inner-html__h0K4t, [class*="job-desc"], section[class*="description"], [class*="jd-description"]');
+    const jobDesc = (descEl?.textContent || document.body?.innerText || '').trim();
+    const fullSnippet = `${title}\n${company}\n${location}\n${expText}\n${salaryText}\n${postedText}\n${jobDesc}`;
+    const jobUrl = window.location.href.split('#')[0];
+
+    // Recruiter Contact
+    const contactInfo = window.NaukriMatcher?.extractRecruiterContact(fullSnippet) || { hasContact: false };
+
+    // Check if already applied
+    const isAlreadyApplied = appliedJobs.some(j => (j.url && j.url === jobUrl) || (j.title === title && j.company === company)) ||
+      (document.body?.innerText || '').toLowerCase().includes('already applied') ||
+      (document.body?.innerText || '').toLowerCase().includes('you have already applied');
+
+    if (isAlreadyApplied) {
+      renderDetailFloatingWidget({ state: 'already_applied' });
+      return;
+    }
+
+    // Check if company site
+    const applyBtnCandidate = document.getElementById('apply-button') || document.querySelector('button.apply-button, [class*="apply-button"]');
+    const btnTxt = (applyBtnCandidate?.textContent || '').toLowerCase().trim();
+    const isCompanySite = btnTxt.includes('company site') || btnTxt.includes('employer website') || btnTxt.includes('apply on company');
+
+    if (isCompanySite) {
+      renderDetailFloatingWidget({ state: 'company_site' });
+      const companyUrl = applyBtnCandidate?.href || (applyBtnCandidate?.closest('a') ? applyBtnCandidate.closest('a').href : jobUrl);
       chrome.runtime.sendMessage({
         action: 'SAVE_JOB',
-        job: {
-          title: document.title || 'Job Listing',
-          company: 'Naukri Listing',
-          url: window.location.href,
-          reason: '⚠️ Incomplete: Naukri rejected application (Mandatory questions / profile details required)'
-        }
+        job: { title, company, url: companyUrl, reason: 'External Company Site', contactInfo }
       }).catch(() => {});
-    } else if (
-      pageText.includes('applied successfully') ||
-      pageText.includes('application sent') ||
-      pageText.includes('successfully applied') ||
-      pageText.includes('thank you for applying')
-    ) {
-      log('🎉 Application confirmed on saveApply page!', 'success');
-      playAudioChime();
-      updateFloatingPill('🎉 Applied Successfully!', { isDone: true, status: 'success', showStop: false });
+      return;
     }
+
+    // Evaluate Filter Rules via NaukriMatcher
+    let mismatchReason = null;
+
+    if (!isSessionRunning && !hasAutoApplyHash && window.NaukriMatcher) {
+      // 1. Spam
+      if (settings.blockAiSpam !== false) {
+        const spam = window.NaukriMatcher.isAiGigSpam(title, company, jobDesc);
+        if (spam.isSpam) mismatchReason = `AI/Gig Spam: ${spam.reason}`;
+      }
+      // 2. Blocked company
+      if (!mismatchReason && settings.blockedCompanies) {
+        if (window.NaukriMatcher.isCompanyBlocked(company, settings.blockedCompanies)) {
+          mismatchReason = `Blocked Company: ${company}`;
+        }
+      }
+      // 3. Title relevance
+      if (!mismatchReason && settings.matchTitleRelevance !== false) {
+        if (!window.NaukriMatcher.checkTitleRelevance(title, settings.targetJobQuery)) {
+          mismatchReason = `Title Irrelevant: "${title}"`;
+        }
+      }
+      // 4. Strict Location match
+      if (!mismatchReason && settings.strictLocation) {
+        if (!window.NaukriMatcher.checkLocationMatch(location, settings.targetLocation)) {
+          mismatchReason = `Location Mismatch: ${location || 'Unknown'} (Target: ${settings.targetLocation})`;
+        }
+      }
+      // 5. Blacklist keywords
+      if (!mismatchReason && settings.blacklistKeywords) {
+        if (window.NaukriMatcher.isBlacklisted(fullSnippet, settings.blacklistKeywords)) {
+          mismatchReason = 'Blacklisted Keyword in Job Text';
+        }
+      }
+      // 6. Experience requirement
+      if (!mismatchReason) {
+        const parsedExp = window.NaukriMatcher.parseExperienceRequirement(title, jobDesc, expText);
+        if (parsedExp !== null && settings.userYearsExp !== undefined && parsedExp > Number(settings.userYearsExp)) {
+          mismatchReason = `Requires ${parsedExp}+ Yrs Exp (Profile: ${settings.userYearsExp} Yrs)`;
+        }
+      }
+      // 7. Salary floor
+      if (!mismatchReason && settings.minMonthlySalary) {
+        const salParsed = window.NaukriMatcher.parseMonthlySalary(salaryText);
+        if (salParsed && salParsed.maxMonthly && salParsed.maxMonthly < Number(settings.minMonthlySalary)) {
+          mismatchReason = `Salary below ₹${settings.minMonthlySalary}/mo floor`;
+        }
+      }
+      // 8. Freshness
+      if (!mismatchReason && settings.jobFreshness && settings.jobFreshness !== 'all' && window.NaukriMatcher.parseJobAgeDays) {
+        const postAgeDays = window.NaukriMatcher.parseJobAgeDays(fullSnippet);
+        const maxAgeDays = Number(settings.jobFreshness);
+        if (postAgeDays !== null && !isNaN(maxAgeDays) && postAgeDays > maxAgeDays) {
+          mismatchReason = `Stale Post: ~${postAgeDays}d old (> ${maxAgeDays}d)`;
+        }
+      }
+    }
+
+    // DECISION:
+    if (mismatchReason) {
+      log(`⏭️ Standalone listing does not match filters: ${mismatchReason}`, 'info');
+      renderDetailFloatingWidget({
+        state: 'mismatch',
+        reason: mismatchReason,
+        onClickApply: () => {
+          renderDetailFloatingWidget({ state: 'auto_applying' });
+          handleAutoApplyOnDetailPage(true);
+        }
+      });
+      return;
+    }
+
+    // MATCHED! AUTONOMOUSLY APPLY WITHOUT REQUIRING USER CLICK!
+    log(`🎯 Job Matches All Filters! Auto-applying autonomously...`, 'success');
+    renderDetailFloatingWidget({ state: 'auto_applying' });
+    setTimeout(() => {
+      handleAutoApplyOnDetailPage(false);
+    }, 800);
   }
 
+  // Standalone page check: evaluate filters and autonomously apply on matching listings
+  if (window.location.pathname.includes('/job-listings') || window.location.pathname.includes('/job-desc')) {
+    setTimeout(initializeDetailPageHandler, 600);
+  } // Dedicated handler for Naukri's saveApply error / confirmation landing page
   // Auto-start crawler if session is running upon load on search pages
   chrome.storage.local.get(['autoApplySession'], (data) => {
     if (data.autoApplySession && data.autoApplySession.isRunning) {
-      if (!window.location.pathname.includes('/job-listings') && !window.location.pathname.includes('/job-desc') && !window.location.pathname.includes('/myapply/saveApply')) {
+      if (!window.location.pathname.includes('/job-listings') && !window.location.pathname.includes('/job-desc') ) {
         setTimeout(() => {
           runCrawlSession();
         }, 1500);
