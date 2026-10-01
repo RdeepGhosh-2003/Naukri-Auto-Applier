@@ -1273,7 +1273,9 @@
         await new Promise(r => setTimeout(r, 200));
         attempts++;
       }
-      
+      if (continueBtn.disabled || continueBtn.getAttribute('aria-disabled') === 'true' || continueBtn.classList.contains('disabled')) {
+        return { action: 'unresolved', reason: 'unanswered_questions' };
+      }
       triggerHumanClick(continueBtn);
       return { action: 'advanced', button: continueBtn };
     }
@@ -1294,7 +1296,9 @@
         await new Promise(r => setTimeout(r, 200));
         attempts++;
       }
-      if (hasUnansweredQuestions(container)) { return { action: "unresolved", reason: "unanswered_questions" }; }
+      if (hasUnansweredQuestions(container) || drawerActionBtn.disabled || drawerActionBtn.getAttribute('aria-disabled') === 'true' || drawerActionBtn.classList.contains('disabled')) {
+        return { action: 'unresolved', reason: 'unanswered_questions' };
+      }
       triggerHumanClick(drawerActionBtn);
       return { action: 'submitted', button: drawerActionBtn };
     }

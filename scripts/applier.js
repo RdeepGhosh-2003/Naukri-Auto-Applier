@@ -1398,11 +1398,62 @@
   // Standalone page check: evaluate filters and autonomously apply on matching listings
   if (window.location.pathname.includes('/job-listings') || window.location.pathname.includes('/job-desc')) {
     setTimeout(initializeDetailPageHandler, 600);
-  } // Dedicated handler for Naukri's saveApply error / confirmation landing page
+  } else if (window.location.pathname.includes('/myapply/saveApply') || window.location.href.includes('/saveApply')) {
+    setTimeout(handleSaveApplyPage, 600);
+  }
+
+  // Dedicated handler for Naukri's saveApply error / confirmation landing page
+  function handleSaveApplyPage() {
+    const pageText = (document.body?.innerText || '').toLowerCase();
+    const isRejected = pageText.includes('your application was not accepted') ||
+                       pageText.includes('application was not accepted') ||
+                       pageText.includes('due to incomplete information') ||
+                       pageText.includes('please answer all mandatory questions');
+
+    if (isRejected) {
+      log('⚠️ Application not accepted by Naukri due to incomplete mandatory questions or profile details.', 'warning');
+      playAudioChime();
+
+      updateFloatingPill('⚠️ Application Incomplete: Mandatory Questions or Profile Details Required', {
+        isDone: true,
+        status: 'warning',
+        showStop: false,
+        actionButton: {
+          text: '↩️ Return to Job',
+          bg: '#f59e0b',
+          onClick: () => {
+            if (window.history.length > 1) {
+              window.history.back();
+            }
+          }
+        }
+      });
+
+      chrome.runtime.sendMessage({
+        action: 'SAVE_JOB',
+        job: {
+          title: document.title || 'Job Listing',
+          company: 'Naukri Listing',
+          url: window.location.href,
+          reason: '⚠️ Incomplete: Naukri rejected application (Mandatory questions / profile details required)'
+        }
+      }).catch(() => {});
+    } else if (
+      pageText.includes('applied successfully') ||
+      pageText.includes('application sent') ||
+      pageText.includes('successfully applied') ||
+      pageText.includes('thank you for applying')
+    ) {
+      log('🎉 Application confirmed on saveApply page!', 'success');
+      playAudioChime();
+      updateFloatingPill('🎉 Applied Successfully!', { isDone: true, status: 'success', showStop: false });
+    }
+  }
+
   // Auto-start crawler if session is running upon load on search pages
   chrome.storage.local.get(['autoApplySession'], (data) => {
     if (data.autoApplySession && data.autoApplySession.isRunning) {
-      if (!window.location.pathname.includes('/job-listings') && !window.location.pathname.includes('/job-desc') ) {
+      if (!window.location.pathname.includes('/job-listings') && !window.location.pathname.includes('/job-desc') && !window.location.pathname.includes('/myapply/saveApply')) {
         setTimeout(() => {
           runCrawlSession();
         }, 1500);
