@@ -60,6 +60,35 @@
     'years', 'year', 'experience', 'about', 'some', 'any'
   ]);
 
+  function autoSaveLearnedQA(qText, answer, profileArg) {
+    if (!qText || !answer) return;
+    const saveToProfile = (profile) => {
+      profile.screening = profile.screening || [];
+      const cleanQ = qText.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+      const alreadyExists = profile.screening.some(item => cleanQ.includes(item.keywords.toLowerCase()) || item.keywords.toLowerCase().includes(cleanQ));
+      if (!alreadyExists) {
+        const keywords = cleanQ.split(' ').filter(w => w.length > 3 && !STOPWORDS.has(w)).slice(0, 4).join(', ');
+        if (keywords && keywords.length >= 3) {
+          profile.screening.push({ keywords, answer: String(answer) });
+          try {
+            chrome.storage.local.set({ userProfile: profile });
+            console.log(`[FormFiller Auto-Learn] Dynamically Saved: "${keywords}" -> "${answer}"`);
+          } catch (_) {}
+        }
+      }
+    };
+
+    if (profileArg) {
+      saveToProfile(profileArg);
+    } else {
+      try {
+        chrome.storage.local.get(['userProfile'], (res) => {
+          if (res?.userProfile) saveToProfile(res.userProfile);
+        });
+      } catch (_) {}
+    }
+  }
+
   // Helper to simulate full human click events for React state
   function triggerHumanClick(el) {
     if (!el) return;
@@ -867,12 +896,58 @@
   }
 
   // Auto-Learn manual user edits into profile
+  function attachAutoLearnListeners(container) {
+    if (!container || container.dataset.naukriAutoLearnAttached) return;
+    container.dataset.naukriAutoLearnAttached = 'true';
+
+    // 1. Listen for changes on inputs, textareas, selects
+    container.addEventListener('change', (e) => {
+      const el = e.target;
+      if (!el) return;
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
+        const val = el.type === 'checkbox' ? (el.checked ? (el.value || 'Yes') : '') : (el.value || '').trim();
+        if (!val) return;
+        const qText = getFieldLabelText(el);
+        if (qText && qText.length > 3) {
+          autoSaveLearnedQA(qText, val);
+        }
+      }
+    }, true);
+
+    // 2. Listen for clicks on choices, chips, radio buttons, checkboxes
+    container.addEventListener('click', (e) => {
+      const target = e.target;
+      if (!target) return;
+      const choiceEl = target.closest('[role="radio"], [role="checkbox"], [role="option"], label, li, [class*="chip" i], [class*="option" i], [class*="choice" i]');
+      if (choiceEl && container.contains(choiceEl)) {
+        setTimeout(() => {
+          const qText = getFieldLabelText(choiceEl);
+          const val = (choiceEl.textContent || '').trim().replace(/\s+/g, ' ');
+          if (qText && val && val.length < 80) {
+            autoSaveLearnedQA(qText, val);
+          }
+        }, 150);
+      }
+    }, true);
+
+    // 3. When user clicks Submit or Save & Apply in drawer, harvest ALL answers
+    const submitButtons = container.querySelectorAll('button, [role="button"], input[type="submit"]');
+    submitButtons.forEach(btn => {
+      const txt = (btn.textContent || btn.value || '').toLowerCase().trim();
+      if (txt.includes('apply') || txt.includes('submit') || txt.includes('save')) {
+        btn.addEventListener('click', () => {
+          harvestAllContainerAnswers(container);
+        });
+      }
+    });
+  }
+
   // Fill current step fields
   function fillCurrentStep(profile, containerArg) {
     const container = containerArg || getActiveContainer() || document.body;
     if (!container || !profile) return { filled: 0 };
 
-    
+    attachAutoLearnListeners(container);
     let filledCount = 0;
 
     // 1. Screening Choices (MCQ, Checkboxes, Radios, Chatbot Option Lists)
@@ -1198,9 +1273,7 @@
         await new Promise(r => setTimeout(r, 200));
         attempts++;
       }
-      if (continueBtn.disabled || continueBtn.getAttribute('aria-disabled') === 'true' || continueBtn.classList.contains('disabled')) {
-        return { action: 'unresolved', reason: 'unanswered_questions' };
-      }
+      
       triggerHumanClick(continueBtn);
       return { action: 'advanced', button: continueBtn };
     }
@@ -1221,9 +1294,7 @@
         await new Promise(r => setTimeout(r, 200));
         attempts++;
       }
-      if (hasUnansweredQuestions(container) || drawerActionBtn.disabled || drawerActionBtn.getAttribute('aria-disabled') === 'true' || drawerActionBtn.classList.contains('disabled')) {
-        return { action: 'unresolved', reason: 'unanswered_questions' };
-      }
+      if (hasUnansweredQuestions(container)) { return { action: "unresolved", reason: "unanswered_questions" }; }
       triggerHumanClick(drawerActionBtn);
       return { action: 'submitted', button: drawerActionBtn };
     }
