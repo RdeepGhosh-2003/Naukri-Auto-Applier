@@ -1,11 +1,8 @@
 {
-  "name": "naukri-speedfill-extension",
-  "version": "1.0.0",
-  "description": "Chrome Extension for automated job application auto-fill and search fill on Naukri.com",
-  "main": "scripts/matcher.js",
-  "scripts": {
-    "test": "node tests/test_isolation.js && node tests/test_search_fill.js"
-  },
-  "author": "",
+  "name": "naukri-auto-applier",
+  "version": "1.2.0",
+  "description": "Chrome Extension for automated job application auto-fill and crawl engine on Naukri.com",
+  "main": "scripts/applier.js",
+  "author": "Rajdeep Ghosh",
   "license": "MIT"
 }
