@@ -275,6 +275,25 @@ async function handleStopAutoApply() {
   return { success: true };
 }
 
+async function handleResumeAutoApply() {
+  const data = await chrome.storage.local.get(['autoApplySession']);
+  const session = data.autoApplySession;
+  if (!session) return { success: false, error: 'No active session' };
+
+  session.isPaused = false;
+  session.isRunning = true;
+  await chrome.storage.local.set({ autoApplySession: session });
+
+  await appendSessionLog(`▶️ Auto-Apply session resumed. Continuing search...`, 'info');
+  chrome.runtime.sendMessage({ action: 'SESSION_RESUMED', session }).catch(() => {});
+
+  if (session.tabId) {
+    chrome.tabs.sendMessage(session.tabId, { action: 'RESUME_AUTO_APPLY' }).catch(() => {});
+  }
+
+  return { success: true };
+}
+
 async function handleQueryResultsFinished() {
   const data = await chrome.storage.local.get(['autoApplySession']);
   const session = data.autoApplySession;
@@ -419,7 +438,7 @@ async function handleJobApplied(job) {
 // ============================================================================
 // 4B. DETAIL PAGE APPLICATION IN CHILD TAB (FULL-PAGE LISTING ORCHESTRATION)
 // ============================================================================
-async function handleApplyJobInTab(job, senderTabId) {
+async function handleApplyJobInTab(job, senderTabId, settings = {}) {
   return new Promise(async (resolve) => {
     try {
       let targetUrl = job.url || '';
@@ -439,7 +458,7 @@ async function handleApplyJobInTab(job, senderTabId) {
       // Create child tab in background (active: false prevents interrupting user's focus)
       const childTab = await chrome.tabs.create({ url: targetUrl, active: false });
 
-      // Generous 45-second timeout in case page hangs or has slow network
+      // 30-second timeout in case page hangs or has slow network
       const timeoutId = setTimeout(async () => {
         if (pendingDetailApplies.has(childTab.id)) {
           pendingDetailApplies.delete(childTab.id);
@@ -451,12 +470,13 @@ async function handleApplyJobInTab(job, senderTabId) {
           });
           resolve({ status: 'saved', reason: 'timeout' });
         }
-      }, 45000);
+      }, 30000);
 
       pendingDetailApplies.set(childTab.id, {
         resolve,
         timeoutId,
         job,
+        settings,
         sourceTabId: senderTabId,
         startedAt: Date.now()
       });
@@ -474,9 +494,15 @@ async function handleDetailApplyFinished(childTabId, request) {
     clearTimeout(entry.timeoutId);
     pendingDetailApplies.delete(childTabId);
 
-    // ONLY stop and keep tab open for the 'Apply' button when questions remain unanswered!
-    // NEVER stop or keep tab open for 'Apply on company site' (company_site), already_applied, or other listings!
+    // Only pause and keep tab open if the user specifically turned ON "pauseOnUnansweredQuestions".
+    // Default: false -> Incomplete/questionnaire jobs are auto-saved to "Saved Jobs" and the crawler continues.
+    const isPauseRequested = Boolean(
+      entry.settings?.pauseOnUnansweredQuestions ||
+      request.settings?.pauseOnUnansweredQuestions
+    );
+
     const shouldKeepTabOpen = Boolean(
+      isPauseRequested &&
       request.keepTabOpen &&
       request.status !== 'company_site' &&
       request.status !== 'applied' &&
@@ -490,7 +516,7 @@ async function handleDetailApplyFinished(childTabId, request) {
       } catch (_) {}
 
       await appendSessionLog(
-        `✍️ Stopped auto-apply for "${entry.job.title}" at "${entry.job.company}". Leaving tab open for you to fill unanswered questions.`,
+        `✍️ Application paused for "${entry.job.title}" at "${entry.job.company}". Tab kept open for you to answer questions.`,
         'warning'
       );
 
@@ -510,10 +536,17 @@ async function handleDetailApplyFinished(childTabId, request) {
         }
       } catch (_) {}
     } else {
-      // Close child tab cleanly for company_site, applied, skipped, etc.
+      // Close child tab cleanly for company_site, applied, skipped, or saved incomplete jobs
       try {
         await chrome.tabs.remove(childTabId);
       } catch (_) {}
+
+      if (request.status === 'saved' && request.reason) {
+        await appendSessionLog(
+          `📋 Saved listing "${entry.job.title}" (${request.reason}) — continuing search...`,
+          'info'
+        );
+      }
 
       // Ensure search tab stays active if it was open
       if (entry.sourceTabId) {
@@ -633,8 +666,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === 'RESUME_AUTO_APPLY') {
+    handleResumeAutoApply()
+      .then(res => sendResponse(res))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
   if (request.action === 'APPLY_JOB_IN_TAB' && request.job) {
-    handleApplyJobInTab(request.job, sender.tab?.id)
+    handleApplyJobInTab(request.job, sender.tab?.id, request.settings || {})
       .then(res => sendResponse(res))
       .catch(err => sendResponse({ status: 'saved', reason: err.message }));
     return true;

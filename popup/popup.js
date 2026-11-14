@@ -36,6 +36,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const ruleSaveContact = document.getElementById('rule-save-contact');
   const ruleBlockSpam = document.getElementById('rule-block-spam');
   const ruleTitleRelevance = document.getElementById('rule-title-relevance');
+  const rulePauseUnanswered = document.getElementById('rule-pause-unanswered');
   const ruleDelay = document.getElementById('rule-delay');
   const ruleMaxJobs = document.getElementById('rule-max-jobs');
   const btnSaveRules = document.getElementById('btn-save-rules');
@@ -182,6 +183,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     ruleSaveContact.checked = r.saveContactJobs !== false;
     ruleBlockSpam.checked = r.blockAiSpam !== false;
     ruleTitleRelevance.checked = r.matchTitleRelevance !== false;
+    rulePauseUnanswered.checked = Boolean(r.pauseOnUnansweredQuestions);
     ruleDelay.value = r.stepDelayMs || 1200;
     ruleMaxJobs.value = r.maxJobsPerSession || 25;
 
@@ -305,8 +307,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     btnResume.disabled = true;
     sessionBadge.textContent = 'Resuming...';
     chrome.runtime.sendMessage({
-      action: 'FORWARD_TO_ACTIVE_TAB',
-      message: { action: 'RESUME_AUTO_APPLY' }
+      action: 'RESUME_AUTO_APPLY'
     }, () => {
       btnResume.style.display = 'none';
       btnResume.disabled = false;
@@ -341,6 +342,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     prof.autoApplierSettings.saveContactJobs = ruleSaveContact.checked;
     prof.autoApplierSettings.blockAiSpam = ruleBlockSpam.checked;
     prof.autoApplierSettings.matchTitleRelevance = ruleTitleRelevance.checked;
+    prof.autoApplierSettings.pauseOnUnansweredQuestions = rulePauseUnanswered.checked;
     prof.autoApplierSettings.stepDelayMs = parseInt(ruleDelay.value, 10) || 1200;
     prof.autoApplierSettings.maxJobsPerSession = parseInt(ruleMaxJobs.value, 10) || 25;
 

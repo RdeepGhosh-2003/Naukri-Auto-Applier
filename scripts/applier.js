@@ -841,11 +841,15 @@
       }
 
       const card = cards[i];
-      const result = await processJobTuple(card, profile, settings);
-
-      if (result !== 'already_processed') {
-        pageScannedCount++;
-        await humanDelay(settings.stepDelayMs || 1200);
+      try {
+        const result = await processJobTuple(card, profile, settings);
+        if (result !== 'already_processed') {
+          pageScannedCount++;
+          await humanDelay(settings.stepDelayMs || 1200);
+        }
+      } catch (cardErr) {
+        console.error('[Applier] Error processing job card tuple:', cardErr);
+        log(`⚠️ Skipping card due to DOM parsing error. Continuing...`, 'warning');
       }
     }
 
@@ -854,9 +858,12 @@
       return;
     }
 
-    // Pagination: look for Next Page button
+    // Pagination: scroll down to trigger lazy rendering and find the Next Page button
     log('Finished evaluating cards on current page. Checking for Next Page...', 'info');
-    await sleep(1500);
+    try {
+      window.scrollTo({ top: document.body.scrollHeight - 400, behavior: 'smooth' });
+    } catch (_) {}
+    await sleep(2000);
 
     function isValidNextButton(el) {
       if (!el) return false;
@@ -866,15 +873,16 @@
 
       const txt = (el.textContent || '').toLowerCase().trim();
       const aria = (el.getAttribute('aria-label') || '').toLowerCase().trim();
+      const title = (el.getAttribute('title') || '').toLowerCase().trim();
       const href = el.getAttribute('href') || el.href || '';
 
       // Strictly reject Previous buttons
-      if (txt.includes('previous') || aria.includes('previous') || el.className.includes('previous')) {
+      if (txt.includes('previous') || aria.includes('previous') || title.includes('previous') || el.className.includes('previous')) {
         return false;
       }
 
       // Check for Next indicator
-      const isNext = txt === 'next' || txt.includes('next page') || aria === 'next' || aria.includes('next');
+      const isNext = txt === 'next' || txt.startsWith('next') || aria === 'next' || aria.includes('next') || title === 'next' || title.includes('next');
       if (!isNext) return false;
 
       // Reject invalid or undefined destinations
@@ -884,17 +892,39 @@
     }
 
     const candidateLinks = Array.from(document.querySelectorAll(
-      '.pagination a, [class*="pagination"] a, a[class*="styles_btn-secondary"], a.styles_btn-secondary__2AsIP, a.fright, a[aria-label="Next"], a.pagination-next, button'
+      '.pagination a, [class*="pagination"] a, [class*="pages"] a, a[class*="styles_btn-secondary"], a.styles_btn-secondary__2AsIP, a.fright, a[aria-label*="Next" i], a[title*="Next" i], .pagination-next, button'
     ));
-    const nextBtn = candidateLinks.find(isValidNextButton);
+    let nextBtn = candidateLinks.find(isValidNextButton);
+
+    // Fallback: Check numeric pagination for current page + 1
+    if (!nextBtn) {
+      const curPageMatch = window.location.pathname.match(/-(\d+)$/) || window.location.href.match(/page=(\d+)/);
+      const curPage = curPageMatch ? parseInt(curPageMatch[1], 10) : 1;
+      const targetPage = curPage + 1;
+      const numLinks = Array.from(document.querySelectorAll('.pagination a, [class*="pagination"] a, [class*="pages"] a'));
+      nextBtn = numLinks.find(el => {
+        const t = (el.textContent || '').trim();
+        const h = el.getAttribute('href') || '';
+        return t === String(targetPage) || h.endsWith(`-${targetPage}`) || h.includes(`page=${targetPage}`);
+      });
+    }
 
     if (nextBtn) {
       log('Navigating to Next Page...', 'info');
-      window.NaukriFormFiller?.triggerHumanClick(nextBtn);
-      // Wait for page transition / reload
-      await sleep(3500);
-      isRunning = false;
-      runCrawlSession();
+      const href = nextBtn.getAttribute('href') || nextBtn.href;
+      if (href && !href.startsWith('javascript:') && !href.startsWith('#')) {
+        let fullNextUrl = href;
+        if (!fullNextUrl.startsWith('http')) {
+          fullNextUrl = `https://www.naukri.com${fullNextUrl.startsWith('/') ? '' : '/'}${fullNextUrl}`;
+        }
+        window.location.href = fullNextUrl;
+      } else {
+        window.NaukriFormFiller?.triggerHumanClick(nextBtn);
+        // Wait for page transition / reload
+        await sleep(3500);
+        isRunning = false;
+        runCrawlSession();
+      }
     } else {
       log('No more pages for current search query. Notifying queue worker...', 'info');
       chrome.runtime.sendMessage({ action: 'QUERY_RESULTS_FINISHED' }).catch(() => {});
@@ -925,8 +955,13 @@
     }
 
     if (request.action === 'RESUME_AUTO_APPLY') {
+      isHalted = false;
       window._naukriManualResume = true;
       hideCaptchaPillNotice();
+      if (!isRunning && !window.location.pathname.includes('/job-listings') && !window.location.pathname.includes('/job-desc')) {
+        log('▶️ Resuming Auto-Apply crawler...', 'info');
+        runCrawlSession();
+      }
       sendResponse({ status: 'resumed' });
       return true;
     }
@@ -1174,7 +1209,8 @@
         action: 'SAVE_JOB',
         job: { title, company, url: jobUrl, reason: saveReason, contactInfo }
       });
-      return finishDetail('saved', failReason, true /* keepTabOpen */);
+      const shouldPause = Boolean(settings.pauseOnUnansweredQuestions);
+      return finishDetail('saved', failReason, shouldPause /* keepTabOpen */);
     }
   }
 
@@ -1291,6 +1327,19 @@
     // Recruiter Contact
     const contactInfo = window.NaukriMatcher?.extractRecruiterContact(fullSnippet) || { hasContact: false };
 
+    // Helper to send detail finished message when loaded via background child tab
+    function notifyChildTabFinished(status, reason, keepTabOpen = false, extraJob = {}) {
+      if (hasAutoApplyHash) {
+        chrome.runtime.sendMessage({
+          action: 'DETAIL_APPLY_FINISHED',
+          status,
+          reason,
+          keepTabOpen: Boolean(keepTabOpen),
+          job: { title, company, url: jobUrl, contactInfo, ...extraJob }
+        }).catch(() => {});
+      }
+    }
+
     // Check if already applied
     const isAlreadyApplied = appliedJobs.some(j => (j.url && j.url === jobUrl) || (j.title === title && j.company === company)) ||
       (document.body?.innerText || '').toLowerCase().includes('already applied') ||
@@ -1298,6 +1347,7 @@
 
     if (isAlreadyApplied) {
       renderDetailFloatingWidget({ state: 'already_applied' });
+      notifyChildTabFinished('skipped', 'already_applied', false);
       return;
     }
 
@@ -1313,6 +1363,7 @@
         action: 'SAVE_JOB',
         job: { title, company, url: companyUrl, reason: 'External Company Site', contactInfo }
       }).catch(() => {});
+      notifyChildTabFinished('company_site', 'external_site', false, { url: companyUrl });
       return;
     }
 
@@ -1384,6 +1435,7 @@
           handleAutoApplyOnDetailPage(true);
         }
       });
+      notifyChildTabFinished('skipped', mismatchReason, false);
       return;
     }
 

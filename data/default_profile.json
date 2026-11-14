@@ -48,6 +48,7 @@
     "blacklistKeywords": "intern, unpaid, bpo, telecaller, faculty, teaching, night shift",
     "jobFreshness": "1",
     "stepDelayMs": 1200,
+    "pauseOnUnansweredQuestions": false,
     "maxJobsPerSession": 25
   },
   "screening": [
